@@ -282,6 +282,43 @@ div[data-baseweb="toggle"] input:checked + div{
 div[data-testid="stMarkdownContainer"] > p:empty {
   display: none !important;
 }
+/* =========================
+   NUCLEAR: KILL STREAMLIT RED/ORANGE PRIMARY
+   (works even when Streamlit changes DOM)
+   Put this at the VERY END of the <style>
+========================= */
+
+/* Slider - force filled/unfilled track + thumb */
+[data-testid="stSlider"] * {
+  --primary-color: #00E5FF !important;
+  --primaryColor: #00E5FF !important;
+}
+
+/* Thumb */
+[data-testid="stSlider"] div[role="slider"]{
+  background-color: #00E5FF !important;
+  border-color: rgba(0,229,255,0.55) !important;
+  box-shadow: 0 0 0 6px rgba(0,229,255,0.10), 0 10px 28px rgba(0,229,255,0.22) !important;
+}
+
+/* Track pieces (Streamlit/BaseWeb versions vary, so we hit multiple) */
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] div{
+  background-color: rgba(0,229,255,0.60) !important;   /* filled */
+  background: rgba(0,229,255,0.60) !important;
+}
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] div:last-child{
+  background-color: rgba(255,255,255,0.12) !important; /* remaining */
+  background: rgba(255,255,255,0.12) !important;
+}
+
+/* Toggle - force active track color (not just glow) */
+[data-baseweb="toggle"] div[aria-checked="true"]{
+  background-color: rgba(0,229,255,0.55) !important;
+  box-shadow: 0 0 18px rgba(0,229,255,0.45) !important;
+}
+[data-baseweb="toggle"] div[aria-checked="true"] > div{
+  background-color: #00E5FF !important; /* knob */
+}
 
 
 
