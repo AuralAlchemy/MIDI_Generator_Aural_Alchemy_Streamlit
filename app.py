@@ -107,7 +107,7 @@ button, .stButton>button,
   backface-visibility: hidden;
   contain: paint;
 
-  mix-blend-mode: normal;
+
 }
 
 
