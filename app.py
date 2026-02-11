@@ -1,173 +1,295 @@
-# app.py
-# Aural Alchemy — Endless Ambient MIDI Progressions (Streamlit)
-# - Generates N progressions (1–100, default 10)
-# - Optional Re-voicing (inversions/voicings)
-# - Shows preview (first 10)
-# - Exports ZIP: Progressions/*.mid + Chords/*.mid
-# - Download filename always: MIDI_Progressions_Aural_Alchemy.zip
+# app.py — Aural Alchemy | Endless Ambient MIDI Progressions
+# Streamlit app (standalone) that:
+# - Generates diatonic, loop-safe ambient chord progressions (NO out-of-scale, NO low-sim transitions)
+# - Exports a ZIP containing: Progressions (4/8/16-bar folders) + Individual Chords library
+# - Optional Re-Voicing (inversions/voicing engine)
+# - Premium UI styling (Cinzel font everywhere, cyan slider, gold shimmer button, soft glows)
 
-import os, re, math, time, random, shutil, tempfile
+import os
+import re
+import math
+import random
+import shutil
+import tempfile
 from zipfile import ZipFile
 from collections import Counter
 from typing import List, Optional
 
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import numpy as np
 import pretty_midi
 
 
-# ================================
-# UI CONFIG + PREMIUM CSS
-# ================================
+# =========================================================
+# APP CONFIG
+# =========================================================
 st.set_page_config(
-    page_title="Aural Alchemy — MIDI Progressions",
-    page_icon="🌙",
-    layout="centered",
+    page_title="Aural Alchemy • MIDI Progressions",
+    page_icon="✨",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-CSS = """
+APP_TITLE = "AURAL ALCHEMY"
+APP_SUBTITLE = "Endless Ambient MIDI Progressions"
+DOWNLOAD_NAME = "MIDI_Progressions_Aural_Alchemy.zip"
+
+# =========================================================
+# PREMIUM CSS (Cinzel everywhere + cyan slider + shimmer + glows)
+# =========================================================
+st.markdown(
+    r"""
 <style>
-/* Optional font (if you want zero external calls, remove this @import) */
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap');
 
-:root{
-  --ink: rgba(248,250,255,.95);
-  --muted: rgba(248,250,255,.72);
-  --gold: rgba(214,182,92,.65);
-  --goldSoft: rgba(214,182,92,.25);
-  --glass: rgba(6,10,18,.58);
-  --stroke: rgba(255,255,255,.14);
-  --deep: #05070d;
-  --deep2:#0a1220;
+html, body, [class*="css"], .stApp, .block-container,
+h1, h2, h3, h4, h5, h6,
+p, span, div, label,
+button, .stButton>button,
+[data-testid="stMetricLabel"],
+[data-testid="stMetricValue"],
+[data-testid="stMarkdownContainer"],
+[data-testid="stText"] {
+  font-family: "Cinzel", serif !important;
+  letter-spacing: 0.55px !important;
 }
 
-html, body, [class*="css"]{
-  font-family: "Cormorant Garamond", serif !important;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: geometricPrecision;
-}
-
-.stApp{
-  color:var(--ink);
+/* ---- Page background (sacred geometry) ---- */
+.stApp {
   background:
-    radial-gradient(1400px 700px at 50% 30%, rgba(214,182,92,.08), transparent 65%),
-    linear-gradient(180deg,var(--deep),var(--deep2));
-  overflow:hidden;
+    radial-gradient(1200px 700px at 20% 15%, rgba(0,229,255,0.10), rgba(0,0,0,0) 60%),
+    radial-gradient(1200px 700px at 85% 20%, rgba(255,215,0,0.08), rgba(0,0,0,0) 60%),
+    radial-gradient(900px 600px at 50% 85%, rgba(160,120,255,0.06), rgba(0,0,0,0) 65%),
+    linear-gradient(180deg, #070A10 0%, #07080E 35%, #05060A 100%);
 }
 
-/* Mandala overlay (slow + subtle) */
-.stApp:before{
-  content:"";
-  position:fixed; inset:-10%;
-  opacity:.26;
-  background-image:url("data:image/svg+xml;utf8,\
-  <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 1200'>\
-  <defs>\
-  <pattern id='m' width='520' height='520' patternUnits='userSpaceOnUse'>\
-  <g transform='translate(260 260)' fill='none' stroke='rgba(255,255,255,0.28)' stroke-width='1.05'>\
-  <circle r='70'/><circle r='130'/><circle r='190' stroke-opacity='0.22'/>\
-  <path d='M0 -210 L0 210' stroke-opacity='0.20'/>\
-  <path d='M-210 0 L210 0' stroke-opacity='0.20'/>\
-  <path d='M-148 -148 L148 148' stroke-opacity='0.18'/>\
-  <path d='M148 -148 L-148 148' stroke-opacity='0.18'/>\
-  <g stroke-opacity='0.16'>\
-    <circle cx='0' cy='-120' r='120'/>\
-    <circle cx='104' cy='-60' r='120'/>\
-    <circle cx='104' cy='60' r='120'/>\
-    <circle cx='0' cy='120' r='120'/>\
-    <circle cx='-104' cy='60' r='120'/>\
-    <circle cx='-104' cy='-60' r='120'/>\
-  </g>\
-  </g></pattern></defs>\
-  <rect width='1200' height='1200' fill='url(%23m)'/>\
-  </svg>");
-  background-size: 820px 820px;
-  animation: mandala 42s linear infinite;
-  pointer-events:none;
-  z-index:0;
+/* Geometry overlay container */
+.aa-geom-wrap {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.58;
+  filter: blur(0px);
 }
-@keyframes mandala{
-  0%   { transform: rotate(0deg) scale(1.00); }
-  50%  { transform: rotate(180deg) scale(1.03); }
-  100% { transform: rotate(360deg) scale(1.00); }
+.aa-geom {
+  position: absolute;
+  inset: -10%;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 1200px 1200px;
+  animation: aaSlowSpin 48s linear infinite;
+  opacity: 0.32;
+}
+@keyframes aaSlowSpin {
+  0%   { transform: rotate(0deg) scale(1.02); }
+  50%  { transform: rotate(180deg) scale(1.01); }
+  100% { transform: rotate(360deg) scale(1.02); }
 }
 
-.block-container{
-  position:relative;
-  z-index:1;
-  max-width: 920px;
-  padding-top: 28px;
-  padding-bottom: 48px;
+/* Header */
+.aa-hero {
+  position: relative;
+  z-index: 2;
+  margin-top: 10px;
+  padding: 22px 22px 10px 22px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+  backdrop-filter: blur(8px);
+}
+.aa-title {
+  font-size: 46px;
+  font-weight: 700;
+  letter-spacing: 3.2px !important;
+  line-height: 1.05;
+  margin: 0;
+  padding: 0;
+  background: linear-gradient(90deg, rgba(255,255,255,0.98), rgba(0,229,255,0.90), rgba(255,215,0,0.92));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 12px 30px rgba(0,0,0,0.55);
+}
+.aa-subtitle {
+  margin-top: 8px;
+  font-size: 16px;
+  opacity: 0.82;
+  letter-spacing: 1.1px !important;
 }
 
-h1, h2, h3{
-  font-family:"Cinzel", serif !important;
-  letter-spacing: 0.8px;
+/* Panels */
+.aa-panel {
+  position: relative;
+  z-index: 2;
+  padding: 18px 18px 12px 18px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.42);
+  backdrop-filter: blur(8px);
 }
 
-.aa-card{
-  background: var(--glass);
-  border: 1px solid var(--stroke);
-  border-radius: 28px;
-  padding: 22px 22px 18px;
-  box-shadow: 0 28px 90px rgba(0,0,0,.62);
-  backdrop-filter: blur(18px);
+/* Summary watermark only behind summary section */
+.aa-summary-watermark {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.12;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 650px 650px;
+  filter: blur(0px);
 }
 
-.small-muted{
-  color: var(--muted);
-  font-size: 18px;
-  letter-spacing: .4px;
-  margin-top: -8px;
+/* Cyan slider styling (BaseWeb) */
+div[data-baseweb="slider"] div[role="slider"]{
+  background: rgba(0, 229, 255, 0.95) !important;
+  box-shadow:
+    0 0 0 6px rgba(0,229,255,0.10),
+    0 8px 25px rgba(0,229,255,0.20) !important;
+  border: 1px solid rgba(0,229,255,0.35) !important;
+}
+div[data-baseweb="slider"] div[role="presentation"] > div{
+  background: rgba(0, 229, 255, 0.55) !important;
+}
+div[data-baseweb="slider"] div[role="presentation"] > div + div{
+  background: rgba(255,255,255,0.08) !important;
 }
 
-.stButton>button{
-  font-family:"Cinzel", serif !important;
-  font-weight: 650 !important;
-  letter-spacing: 1px !important;
-  border-radius: 999px !important;
-  padding: 12px 18px !important;
-  border: 1px solid var(--goldSoft) !important;
+/* Toggle glow when active */
+div[data-baseweb="toggle"] input:checked + div{
+  box-shadow: 0 0 18px rgba(0,229,255,0.55) !important;
+}
+
+/* Button: premium + gold shimmer hover */
+.stButton>button {
+  background: linear-gradient(135deg, rgba(10,25,35,0.92), rgba(18,38,48,0.92), rgba(26,55,68,0.92)) !important;
+  color: rgba(255,255,255,0.96) !important;
+  border-radius: 14px !important;
+  padding: 0.85em 2em !important;
+  border: 1px solid rgba(255,255,255,0.16) !important;
+  transition: transform .25s ease, box-shadow .25s ease, filter .25s ease !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+.stButton>button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 38px rgba(255,215,0,0.28), 0 18px 55px rgba(0,0,0,0.45) !important;
+  filter: brightness(1.03);
+}
+.stButton>button::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -85%;
+  width: 55%;
+  height: 100%;
+  background: linear-gradient(120deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,215,0,0.55) 50%,
+    rgba(255,255,255,0) 100%);
+  transform: skewX(-25deg);
+}
+.stButton>button:hover::after {
+  animation: shimmer 1.2s ease;
+}
+@keyframes shimmer { 100% { left: 140%; } }
+
+/* Metric cards glow */
+[data-testid="stMetric"] {
+  border-radius: 16px !important;
+  padding: 14px 14px 10px 14px !important;
   background:
-    radial-gradient(circle at 28% 30%, rgba(214,182,92,.34), transparent 60%),
-    linear-gradient(180deg, rgba(18,22,36,.96), rgba(6,10,18,.96)) !important;
-  box-shadow:
-    0 14px 42px rgba(0,0,0,.55),
-    inset 0 0 30px rgba(214,182,92,.14) !important;
-  transition: transform .25s ease, box-shadow .25s ease, filter .25s ease;
-}
-.stButton>button:hover{
-  transform: translateY(-2px);
-  box-shadow:
-    0 22px 66px rgba(0,0,0,.72),
-    inset 0 0 44px rgba(214,182,92,.22) !important;
-  filter: brightness(1.06);
+    radial-gradient(650px 220px at 50% 0%, rgba(0,229,255,0.10), rgba(0,0,0,0) 60%),
+    radial-gradient(650px 220px at 50% 100%, rgba(255,215,0,0.08), rgba(0,0,0,0) 60%),
+    linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)) !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.38) !important;
 }
 
-[data-testid="stSlider"]{
-  font-family:"Cormorant Garamond", serif !important;
+/* Dataframe polish */
+[data-testid="stDataFrame"] {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 14px 40px rgba(0,0,0,0.38);
 }
+
+/* Reduce top whitespace */
+.block-container { padding-top: 1.0rem !important; }
+
 </style>
+""",
+    unsafe_allow_html=True,
+)
+
+# Geometry SVG overlay (circle + triangle + rings)
+GEOM_SVG = """
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="rgba(0,229,255,0.55)"/>
+      <stop offset="0.55" stop-color="rgba(255,255,255,0.20)"/>
+      <stop offset="1" stop-color="rgba(255,215,0,0.40)"/>
+    </linearGradient>
+  </defs>
+
+  <g fill="none" stroke="url(#g1)" stroke-width="2" opacity="0.9">
+    <circle cx="600" cy="600" r="420"/>
+    <circle cx="600" cy="600" r="340" opacity="0.55"/>
+    <circle cx="600" cy="600" r="260" opacity="0.40"/>
+    <circle cx="600" cy="600" r="190" opacity="0.35"/>
+    <circle cx="600" cy="600" r="120" opacity="0.28"/>
+    <polygon points="600,210 960,840 240,840" opacity="0.35"/>
+    <polygon points="600,300 870,790 330,790" opacity="0.25"/>
+    <circle cx="600" cy="600" r="480" opacity="0.22"/>
+    <circle cx="600" cy="600" r="520" opacity="0.18"/>
+  </g>
+
+  <g fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1">
+    <path d="M600 80 L600 1120" opacity="0.20"/>
+    <path d="M80 600 L1120 600" opacity="0.20"/>
+    <path d="M220 220 L980 980" opacity="0.14"/>
+    <path d="M980 220 L220 980" opacity="0.14"/>
+  </g>
+</svg>
 """
-st.markdown(CSS, unsafe_allow_html=True)
+GEOM_DATA_URI = "data:image/svg+xml;utf8," + re.sub(r"\s+", " ", GEOM_SVG).replace("#", "%23")
+
+SUMMARY_WATERMARK_SVG = """
+<svg width="900" height="900" viewBox="0 0 900 900" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke="rgba(255,255,255,0.30)" stroke-width="2">
+    <circle cx="450" cy="450" r="300"/>
+    <circle cx="450" cy="450" r="240" opacity="0.6"/>
+    <circle cx="450" cy="450" r="180" opacity="0.45"/>
+    <polygon points="450,165 690,615 210,615" opacity="0.45"/>
+    <polygon points="450,225 645,590 255,590" opacity="0.25"/>
+  </g>
+</svg>
+"""
+SUMMARY_WM_URI = "data:image/svg+xml;utf8," + re.sub(r"\s+", " ", SUMMARY_WATERMARK_SVG).replace("#", "%23")
 
 st.markdown(
-    """
-    <div style="text-align:center;">
-      <h1 style="margin-bottom:10px;">AURAL ALCHEMY</h1>
-      <div class="small-muted">Endless Ambient MIDI Progressions · Pack-Ready</div>
-    </div>
-    """,
-    unsafe_allow_html=True
+    f"""
+<div class="aa-geom-wrap">
+  <div class="aa-geom" style="background-image:url('{GEOM_DATA_URI}');"></div>
+</div>
+""",
+    unsafe_allow_html=True,
 )
 
-st.markdown('<div class="aa-card">', unsafe_allow_html=True)
+# =========================================================
+# MUSICAL DATA + SAFE CHORD DEFINITIONS (define BEFORE generator)
+# =========================================================
+NOTE_TO_PC = {
+    "C": 0, "B#": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3, "E": 4, "Fb": 4, "E#": 5, "F": 5,
+    "F#": 6, "Gb": 6, "G": 7, "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11, "Cb": 11,
+}
 
-
-# ================================
-# MUSICAL DATA (from your notebook)
-# ================================
-KEYS = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"]
+KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
 SCALES = {
     "C":  ["C","D","E","F","G","A","B"],
@@ -184,15 +306,7 @@ SCALES = {
     "B":  ["B","C#","D#","E","F#","G#","A#"],
 }
 
-NOTE_TO_PC = {
-    "C":0,"B#":0,"C#":1,"Db":1,"D":2,"D#":3,"Eb":3,"E":4,"Fb":4,"E#":5,"F":5,
-    "F#":6,"Gb":6,"G":7,"G#":8,"Ab":8,"A":9,"A#":10,"Bb":10,"B":11,"Cb":11,
-}
-
-def _pc(note): return NOTE_TO_PC[note]
-def _key_pc_set(key): return {_pc(n) for n in SCALES[key]}
-
-# Canonical chord interval formulas (moved BEFORE generator so it never KeyErrors)
+# Canonical interval formulas (PC-safe + note-count safe)
 QUAL_TO_INTERVALS = {
     "maj":        [0,4,7],
     "min":        [0,3,7],
@@ -212,16 +326,27 @@ QUAL_TO_INTERVALS = {
     "sus2add9":   [0,2,7,14],
     "sus4add9":   [0,5,7,14],
 }
-QUALITY_NOTECOUNT = {q: len(iv) for q, iv in QUAL_TO_INTERVALS.items()}
+QUALITY_NOTECOUNT = {q: len(v) for q, v in QUAL_TO_INTERVALS.items()}
 
-def _chord_pc_set_real(root_note, qual):
+
+def _pc(note: str) -> int:
+    return NOTE_TO_PC[note]
+
+
+def _key_pc_set(key: str) -> set:
+    return {_pc(n) for n in SCALES[key]}
+
+
+def _chord_pc_set_real(root_note: str, qual: str) -> set:
     r = _pc(root_note)
     return {(r + iv) % 12 for iv in QUAL_TO_INTERVALS[qual]}
 
-def _is_diatonic_chord(key, root_note, qual):
+
+def _is_diatonic_chord(key: str, root_note: str, qual: str) -> bool:
     return _chord_pc_set_real(root_note, qual).issubset(_key_pc_set(key))
 
-def _shared_tone_ok_loop(roots, quals, need=1, loop=True):
+
+def _shared_tone_ok_loop(roots, quals, need=1, loop=True) -> bool:
     pcs = [_chord_pc_set_real(r, q) for r, q in zip(roots, quals)]
     for a, b in zip(pcs, pcs[1:]):
         if len(a & b) < need:
@@ -231,7 +356,8 @@ def _shared_tone_ok_loop(roots, quals, need=1, loop=True):
             return False
     return True
 
-def _low_sim_count_loop(roots, quals, loop=True):
+
+def _low_sim_count_loop(roots, quals, loop=True) -> int:
     pcs = [_chord_pc_set_real(r, q) for r, q in zip(roots, quals)]
     bad = 0
     for a, b in zip(pcs, pcs[1:]):
@@ -241,67 +367,47 @@ def _low_sim_count_loop(roots, quals, loop=True):
         bad += 1
     return bad
 
-def _wchoice(rng, items_with_w):
-    items = [x for x,_ in items_with_w]
-    ws    = [w for _,w in items_with_w]
+
+def _wchoice(rng: random.Random, items_with_w):
+    items = [x for x, _ in items_with_w]
+    ws = [w for _, w in items_with_w]
     return rng.choices(items, weights=ws, k=1)[0]
 
 
-# ================================
-# GENERATOR SETTINGS (your notebook defaults)
-# ================================
+# =========================================================
+# GENERATOR SETTINGS (pack-balanced; UI only exposes N + revoicing)
+# =========================================================
+EXPORT_TXT = False
+EXPORT_PY_TXT = False
+
 PATTERN_MAX_REPEATS = 1
-MAX_PATTERN_DUPLICATE_RATIO = 0.01
+MAX_PATTERN_DUPLICATE_RATIO = 0.01  # 1%
 
 TOTAL_BARS_DISTRIBUTION = {8: 0.40, 4: 0.35, 16: 0.25}
 CHORDCOUNT_DISTRIBUTION = {4: 0.40, 3: 0.35, 2: 0.20, 5: 0.03, 6: 0.02}
 
 MIN_SHARED_TONES = 1
-ENFORCE_LOOP_OK  = True
+ENFORCE_LOOP_OK = True
 MAX_TRIES_PER_PROG = 40000
 
 TRIAD_PROB_BASE = 0.90
-BARE_SUS_PROB   = 0.13
+BARE_SUS_PROB = 0.13
 
 LIMIT_NOTECOUNT_JUMPS = True
 MAX_BIG_JUMPS_PER_PROG = 1
 
-SUS_WEIGHT_MULT   = 0.50
-SUS_UPGRADE_PROB  = 0.50
+SUS_WEIGHT_MULT = 0.50
+SUS_UPGRADE_PROB = 0.50
 
-
-# ================================
-# DEGREE TEMPLATES
-# ================================
-TEMPLATES_BY_LEN = {
-    2: [((0,3), 10), ((0,5), 7), ((5,3), 5), ((3,0), 4), ((0,4), 3)],
-    3: [
-        ((0,5,3), 14), ((0,3,4), 12), ((0,3,5), 10), ((0,5,4), 9),
-        ((0,2,3), 7), ((0,2,5), 6), ((3,5,0), 5), ((5,3,0), 5),
-        ((0,1,3), 3), ((0,6,3), 2),
-    ],
-    4: [
-        ((0,5,3,4), 18), ((0,5,3,0), 12), ((0,3,4,3), 12), ((0,3,5,3), 12),
-        ((0,2,5,3), 10), ((0,2,3,4), 10), ((0,1,3,4), 6), ((0,1,3,0), 5),
-        ((5,3,4,0), 5), ((3,4,0,5), 4), ((0,4,3,5), 4),
-    ],
-    5: [((0,5,3,4,3), 4), ((0,3,0,5,3), 3), ((0,2,3,4,3), 3)],
-    6: [((0,5,3,4,3,0), 3), ((0,3,0,5,3,0), 3)],
-}
-
-def _pick_template_degs(rng, m):
-    return list(_wchoice(rng, TEMPLATES_BY_LEN[m]))
-
-
-# ================================
-# QUALITY POOLS
-# ================================
+# Quality pools
 MAJ_POOL = [("maj9", 10), ("maj7", 9), ("add9", 7), ("6add9", 6), ("6", 4), ("maj", 2)]
 MIN_POOL = [("min9", 10), ("min7", 9), ("min11", 4), ("min", 2)]
 SUS_POOL = [("sus2add9", 10), ("sus4add9", 10), ("sus2", 2), ("sus4", 2)]
 
+
 def _scaled_pool(pool, mult):
     return [(q, max(1e-9, w * mult)) for q, w in pool]
+
 
 SUS_POOL_SCALED = _scaled_pool(SUS_POOL, SUS_WEIGHT_MULT)
 
@@ -322,33 +428,29 @@ SAFE_FALLBACK_ORDER = [
     "sus2add9","sus4add9","sus2","sus4"
 ]
 
-def _pick_quality_diatonic(rng, key, deg):
-    root = SCALES[key][deg]
-    triad_boost = (rng.random() < TRIAD_PROB_BASE)
-    pool = DEG_ALLOWED_BASE[deg]
-
-    for _ in range(200):
-        q = _wchoice(rng, pool)
-
-        if q in ("sus2","sus4") and rng.random() < SUS_UPGRADE_PROB:
-            if rng.random() >= BARE_SUS_PROB:
-                q = "sus2add9" if q == "sus2" else "sus4add9"
-
-        if q in ("maj","min") and (not triad_boost) and rng.random() < 0.85:
-            continue
-
-        if _is_diatonic_chord(key, root, q):
-            return q
-
-    for q in SAFE_FALLBACK_ORDER:
-        if _is_diatonic_chord(key, root, q):
-            return q
-    return "maj7"
+# Degree templates
+TEMPLATES_BY_LEN = {
+    2: [((0,3), 10), ((0,5), 7), ((5,3), 5), ((3,0), 4), ((0,4), 3)],
+    3: [
+        ((0,5,3), 14), ((0,3,4), 12), ((0,3,5), 10), ((0,5,4), 9),
+        ((0,2,3), 7), ((0,2,5), 6), ((3,5,0), 5), ((5,3,0), 5),
+        ((0,1,3), 3), ((0,6,3), 2),
+    ],
+    4: [
+        ((0,5,3,4), 18), ((0,5,3,0), 12), ((0,3,4,3), 12), ((0,3,5,3), 12),
+        ((0,2,5,3), 10), ((0,2,3,4), 10), ((0,1,3,4), 6), ((0,1,3,0), 5),
+        ((5,3,4,0), 5), ((3,4,0,5), 4), ((0,4,3,5), 4),
+    ],
+    5: [((0,5,3,4,3), 4), ((0,3,0,5,3), 3), ((0,2,3,4,3), 3)],
+    6: [((0,5,3,4,3,0), 3), ((0,3,0,5,3,0), 3)],
+}
 
 
-# ================================
-# DURATIONS
-# ================================
+def _pick_template_degs(rng: random.Random, m: int) -> list:
+    return list(_wchoice(rng, TEMPLATES_BY_LEN[m]))
+
+
+# Durations
 DURATIONS = {
     (2, 4):  [([2,2], 10)],
     (3, 4):  [([2,1,1], 10), ([1,1,2], 8)],
@@ -366,31 +468,57 @@ DURATIONS = {
     (5,16):  [([4,4,4,2,2], 3), ([2,2,4,4,4], 3), ([4,2,4,2,4], 7), ([2,4,4,4,2], 3)],
     (6,16):  [([4,2,2,4,2,2], 5), ([4,2,2,2,2,4], 4), ([2,4,2,4,2,2], 5)],
 }
-
 VALID_COMBOS = sorted(list(DURATIONS.keys()))
 
-def _pick_durations(rng, m, total):
+
+def _pick_durations(rng: random.Random, m: int, total: int) -> list:
     return _wchoice(rng, DURATIONS[(m, total)])
 
-def _pick_valid_total_and_m(rng):
+
+def _pick_valid_total_and_m(rng: random.Random):
     weighted = []
     for (m, total) in VALID_COMBOS:
         wt = TOTAL_BARS_DISTRIBUTION.get(total, 0.0) * CHORDCOUNT_DISTRIBUTION.get(m, 0.0)
         if wt > 0:
             weighted.append(((total, m), wt))
     if not weighted:
-        raise RuntimeError("No valid (total,m) combos available. Check DURATIONS and distributions.")
+        raise RuntimeError("No valid (total,m) combos available.")
     (total, m) = _wchoice(rng, weighted)
     return total, m
 
 
-# ================================
-# Duplicate controls
-# ================================
 def _pattern_fingerprint(degs, quals):
     return (tuple(degs), tuple(quals))
 
-def _dedupe_inside_progression(rng, key, degs, quals):
+
+def _pick_quality_diatonic(rng: random.Random, key: str, deg: int) -> str:
+    root = SCALES[key][deg]
+    triad_boost = (rng.random() < TRIAD_PROB_BASE)
+    pool = DEG_ALLOWED_BASE[deg]
+
+    for _ in range(200):
+        q = _wchoice(rng, pool)
+
+        # Upgrade bare sus to sus*add9 often (keep bare sus rare)
+        if q in ("sus2", "sus4") and rng.random() < SUS_UPGRADE_PROB:
+            if rng.random() >= BARE_SUS_PROB:
+                q = "sus2add9" if q == "sus2" else "sus4add9"
+
+        # Keep triads rare most of the time
+        if q in ("maj", "min") and (not triad_boost) and rng.random() < 0.85:
+            continue
+
+        if _is_diatonic_chord(key, root, q):
+            return q
+
+    # Fallback guaranteed diatonic
+    for q in SAFE_FALLBACK_ORDER:
+        if _is_diatonic_chord(key, root, q):
+            return q
+    return "maj7"
+
+
+def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: list):
     scale = SCALES[key]
     used = set()
 
@@ -404,10 +532,11 @@ def _dedupe_inside_progression(rng, key, degs, quals):
             used.add(sym)
             continue
 
-        cand = SAFE_FALLBACK_ORDER[:]
-        rng.shuffle(cand)
+        # try other qualities on same root
+        candidate_quals = SAFE_FALLBACK_ORDER[:]
+        rng.shuffle(candidate_quals)
         fixed = False
-        for q2 in cand:
+        for q2 in candidate_quals:
             if q2 == q:
                 continue
             if _is_diatonic_chord(key, root, q2):
@@ -420,11 +549,13 @@ def _dedupe_inside_progression(rng, key, degs, quals):
         if fixed:
             continue
 
-        neighbor_steps = [1,-1,2,-2,3,-3]
+        # else nudge degree
+        neighbor_steps = [1, -1, 2, -2, 3, -3]
         rng.shuffle(neighbor_steps)
         for stp in neighbor_steps:
             d2 = (d + stp) % 7
             root2 = scale[d2]
+
             if _is_diatonic_chord(key, root2, q) and (root2 + q) not in used:
                 degs[i] = d2
                 used.add(root2 + q)
@@ -445,11 +576,13 @@ def _dedupe_inside_progression(rng, key, degs, quals):
 
         if not fixed:
             return None
+
     return degs, quals
 
 
-def _build_progression(rng, key, degs, total_bars):
+def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int):
     quals = [_pick_quality_diatonic(rng, key, d) for d in degs]
+
     ded = _dedupe_inside_progression(rng, key, degs[:], quals[:])
     if ded is None:
         return None
@@ -457,12 +590,15 @@ def _build_progression(rng, key, degs, total_bars):
 
     roots = [SCALES[key][d] for d in degs]
 
+    # hard diatonic
     if any(not _is_diatonic_chord(key, r, q) for r, q in zip(roots, quals)):
         return None
 
+    # hard no LOW_SIM (adjacent + loop)
     if not _shared_tone_ok_loop(roots, quals, need=MIN_SHARED_TONES, loop=ENFORCE_LOOP_OK):
         return None
 
+    # note-count jump limiter
     if LIMIT_NOTECOUNT_JUMPS:
         big = 0
         for a, b in zip(quals, quals[1:]):
@@ -483,9 +619,9 @@ def _build_progression(rng, key, degs, total_bars):
     return chords, durs, key, degs, quals
 
 
-def _pick_keys_even(n, rng):
+def _pick_keys_even(n: int, rng: random.Random) -> list:
     base = n // len(KEYS)
-    rem  = n % len(KEYS)
+    rem = n % len(KEYS)
     out = []
     for k in KEYS:
         out += [k] * base
@@ -496,7 +632,7 @@ def _pick_keys_even(n, rng):
     return out
 
 
-def generate_progressions(n=10, seed=123):
+def generate_progressions(n: int, seed: int):
     rng = random.Random(seed)
     keys = _pick_keys_even(n, rng)
 
@@ -532,6 +668,7 @@ def generate_progressions(n=10, seed=123):
             if pattern_counts[fp] >= PATTERN_MAX_REPEATS and pattern_dupe_used >= max_pattern_dupes:
                 continue
 
+            # accept
             used_exact.add(ek)
             if pattern_counts[fp] >= 1:
                 pattern_dupe_used += 1
@@ -546,20 +683,33 @@ def generate_progressions(n=10, seed=123):
             break
 
         if built is None:
-            raise RuntimeError(f"Could not build progression {i+1}. Space too constrained.")
+            raise RuntimeError(
+                f"Could not build progression {i+1}. Space too constrained. "
+                f"Increase templates/durations or loosen duplicate caps."
+            )
 
         out.append(built)
 
     return out, pattern_dupe_used, max_pattern_dupes, low_sim_total, qual_usage
 
 
-# ================================
-# CHORD -> MIDI + VOICING ENGINE (from your notebook)
-# ================================
-NOTE_TO_SEMITONE = {
-    "C":0,"B#":0,"C#":1,"Db":1,"D":2,"D#":3,"Eb":3,"E":4,"Fb":4,"E#":5,"F":5,
-    "F#":6,"Gb":6,"G":7,"G#":8,"Ab":8,"A":9,"A#":10,"Bb":10,"B":11,"Cb":11,"B#":0
-}
+# =========================================================
+# CHORD -> MIDI + VOICING ENGINE
+# =========================================================
+NOTE_TO_SEMITONE = NOTE_TO_PC.copy()
+
+LOW, HIGH = 48, 84
+TARGET_CENTER = 60.0
+IDEAL_SPAN = 12
+MIN_SPAN = 8
+MAX_SPAN = 19
+
+MAX_SHARED_DEFAULT = 2
+MAX_SHARED_MIN11 = 3
+
+DISALLOW_GLUE = True
+ENFORCE_NOT_RAW_WHEN_VOICING = True
+
 
 def parse_root_and_bass(ch: str):
     ch = ch.strip().replace("6/9", "6add9")
@@ -578,25 +728,27 @@ def parse_root_and_bass(ch: str):
     rest = m.group(2).strip().replace(" ", "")
     return root, rest, bass
 
-def chord_intervals_from_symbol(rest: str):
-    quality = rest.lower()
-    if quality in QUAL_TO_INTERVALS:
-        return QUAL_TO_INTERVALS[quality]
-    raise ValueError(f"Unrecognized chord quality: {rest}")
 
-def chord_to_midi(chord_name: str, base_oct=3, low=48, high=84) -> List[int]:
+def chord_to_midi(chord_name: str, base_oct=3, low=LOW, high=HIGH) -> List[int]:
     root, rest, bass = parse_root_and_bass(chord_name)
     if root not in NOTE_TO_SEMITONE:
         raise ValueError(f"Bad root '{root}' in '{chord_name}'")
+
+    quality = rest.lower()
+    if quality not in QUAL_TO_INTERVALS:
+        raise ValueError(f"Unrecognized chord quality: {rest}")
+
     root_pc = NOTE_TO_SEMITONE[root]
     root_midi = 12 * (base_oct + 1) + root_pc
 
-    tones = chord_intervals_from_symbol(rest)
+    tones = QUAL_TO_INTERVALS[quality]
     notes = []
     for iv in tones:
         p = root_midi + iv
-        while p < low:  p += 12
-        while p > high: p -= 12
+        while p < low:
+            p += 12
+        while p > high:
+            p -= 12
         notes.append(p)
 
     if bass:
@@ -610,52 +762,55 @@ def chord_to_midi(chord_name: str, base_oct=3, low=48, high=84) -> List[int]:
 
     return sorted(set(int(x) for x in notes))
 
-LOW, HIGH = 48, 84
-TARGET_CENTER = 60.0
-IDEAL_SPAN = 12
-MIN_SPAN = 8
-MAX_SPAN = 19
-
-MAX_SHARED_DEFAULT = 2
-MAX_SHARED_MIN11   = 3
-
-DISALLOW_GLUE = True
-ENFORCE_NOT_RAW_WHEN_VOICING = True
 
 def clamp_to_range(notes):
     out = []
     for p in notes:
-        while p < LOW:  p += 12
-        while p > HIGH: p -= 12
+        while p < LOW:
+            p += 12
+        while p > HIGH:
+            p -= 12
         out.append(p)
     return sorted(out)
 
-def span(notes):   return max(notes) - min(notes)
-def center(notes): return (min(notes) + max(notes)) / 2.0
+
+def span(notes):
+    return max(notes) - min(notes)
+
+
+def center(notes):
+    return (min(notes) + max(notes)) / 2.0
+
 
 def has_glued_semitones(notes):
     s = sorted(notes)
-    return any((s[i+1] - s[i]) == 1 for i in range(len(s)-1))
+    return any((s[i + 1] - s[i]) == 1 for i in range(len(s) - 1))
+
 
 def shared_pitch_count(a, b):
     return len(set(a) & set(b))
+
 
 def is_min11_name(ch_name: str) -> bool:
     s = ch_name.replace(" ", "").lower()
     return ("min11" in s)
 
+
 def max_shared_allowed(prev_name, cur_name):
     return MAX_SHARED_MIN11 if (is_min11_name(prev_name) or is_min11_name(cur_name)) else MAX_SHARED_DEFAULT
+
 
 def is_raw_shape(v, raw_notes):
     return sorted(v) == sorted(clamp_to_range(raw_notes))
 
+
 def total_move(prev, cur):
-    p = sorted(prev); c = sorted(cur)
-    n = min(len(p), len(c))
+    p = sorted(prev)
+    c = sorted(cur)
     if len(p) == len(c):
-        return sum(abs(c[i] - p[i]) for i in range(n))
+        return sum(abs(c[i] - p[i]) for i in range(len(p)))
     return abs(center(c) - center(p)) * 2.0
+
 
 def generate_voicing_candidates(raw_notes):
     base = clamp_to_range(raw_notes)
@@ -683,10 +838,13 @@ def generate_voicing_candidates(raw_notes):
     out = [v for v in out if len(set(v)) == len(set(base))]
     return out if out else [base]
 
-def choose_best_voicing(prev_voicing: Optional[List[int]],
-                       prev_name: str,
-                       cur_name: str,
-                       raw_notes: List[int]) -> List[int]:
+
+def choose_best_voicing(
+    prev_voicing: Optional[List[int]],
+    prev_name: str,
+    cur_name: str,
+    raw_notes: List[int]
+) -> List[int]:
     cands = generate_voicing_candidates(raw_notes)
     raw_clamped = clamp_to_range(raw_notes)
 
@@ -708,13 +866,18 @@ def choose_best_voicing(prev_voicing: Optional[List[int]],
 
     def cost(v):
         v = sorted(v)
+
         reg_pen = abs(center(v) - TARGET_CENTER) * 120
+
         sp = span(v)
         span_pen = abs(sp - IDEAL_SPAN) * 80
-        if sp < MIN_SPAN: span_pen += (MIN_SPAN - sp) * 700
-        if sp > MAX_SPAN: span_pen += (sp - MAX_SPAN) * 220
+        if sp < MIN_SPAN:
+            span_pen += (MIN_SPAN - sp) * 700
+        if sp > MAX_SPAN:
+            span_pen += (sp - MAX_SPAN) * 220
 
         move_pen = 0 if prev_voicing is None else total_move(prev_voicing, v) * 7
+
         repeat_pen = 2500 if (prev_voicing is not None and sorted(prev_voicing) == v) else 0
 
         shared_pen = 0
@@ -733,50 +896,55 @@ def choose_best_voicing(prev_voicing: Optional[List[int]],
     return sorted(cands[0])
 
 
-# ================================
-# EXPORTER (writes to temp dir, returns zip bytes)
-# ================================
+# =========================================================
+# EXPORTER
+# =========================================================
 BPM = 85
-PACK_NAME = "MIDI_Progressions_Aural_Alchemy"
 TIME_SIG = (4, 4)
 BASE_OCTAVE = 3
 VELOCITY = 100
 
 BAR_DIR = {4: "4-bar", 8: "8-bar", 16: "16-bar"}
 
+
 def sec_per_bar(bpm=BPM, ts=TIME_SIG):
     return (60.0 / bpm) * ts[0]
 
+
 SEC_PER_BAR = sec_per_bar()
+
 
 def safe_token(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_#-]+", "", str(s))
 
+
 def chord_list_token(chords):
     return "-".join(safe_token(c) for c in chords)
 
+
 def validate_progressions(progressions):
     if not progressions:
-        raise ValueError("Progressions is empty.")
-
+        raise ValueError("No progressions generated.")
     for i, item in enumerate(progressions, start=1):
         if len(item) != 3:
             raise ValueError(f"Progression {i} must be (chords, durations, key).")
         chords, durations, key_name = item
         if len(chords) != len(durations):
-            raise ValueError(f"Progression {i}: chord/duration length mismatch.")
+            raise ValueError(f"Progression {i}: chords/durations mismatch.")
         bars = sum(durations)
         if bars not in (4, 8, 16):
-            raise ValueError(f"Progression {i}: bars sum to {bars}. Must be 4, 8, or 16.")
+            raise ValueError(f"Progression {i}: invalid bar sum {bars}.")
         for ch in chords:
             chord_to_midi(ch, base_oct=BASE_OCTAVE)
 
-def write_progression_midi(out_dir, idx, chords, durations, key_name, revoice: bool):
+
+def write_progression_midi(out_root: str, idx: int, chords, durations, key_name: str, revoice: bool):
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
 
     raw = [chord_to_midi(ch, base_oct=BASE_OCTAVE) for ch in chords]
+
     if revoice:
         voiced = []
         prev_v = None
@@ -790,174 +958,237 @@ def write_progression_midi(out_dir, idx, chords, durations, key_name, revoice: b
             prev_v = v
             prev_name = ch_name
         out_notes = voiced
-        mode_tag = "_REVOICED"
     else:
         out_notes = raw
-        mode_tag = ""
 
     t = 0.0
     for notes, bars in zip(out_notes, durations):
         dur = bars * SEC_PER_BAR
         for p in sorted(set(notes)):
-            inst.notes.append(pretty_midi.Note(int(VELOCITY), int(p), t, t + dur))
+            inst.notes.append(pretty_midi.Note(
+                velocity=int(VELOCITY),
+                pitch=int(p),
+                start=t,
+                end=t + dur
+            ))
         t += dur
 
     midi.instruments.append(inst)
 
     total_bars = sum(durations)
-    bars_folder = BAR_DIR[total_bars]
-    folder = os.path.join(out_dir, "Progressions", bars_folder)
-    os.makedirs(folder, exist_ok=True)
+    out_dir = os.path.join(out_root, "Progressions", BAR_DIR[total_bars])
+    os.makedirs(out_dir, exist_ok=True)
 
-    filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}{mode_tag}_{chord_list_token(chords)}.mid"
-    midi.write(os.path.join(folder, filename))
+    # Keep internal filename descriptive; download ZIP name is fixed.
+    filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}_{chord_list_token(chords)}.mid"
+    midi.write(os.path.join(out_dir, filename))
 
-def write_single_chord_midi(out_dir, chord_name, revoice: bool, length_bars=4):
+
+def write_single_chord_midi(out_root: str, chord_name: str, revoice: bool, length_bars=4):
     dur = length_bars * SEC_PER_BAR
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
 
     raw = chord_to_midi(chord_name, base_oct=BASE_OCTAVE)
-    if revoice:
-        notes = choose_best_voicing(None, chord_name, chord_name, raw)
-        mode_tag = "_REVOICED"
-    else:
-        notes = raw
-        mode_tag = ""
+    notes = choose_best_voicing(None, chord_name, chord_name, raw) if revoice else raw
 
     for p in sorted(set(notes)):
-        inst.notes.append(pretty_midi.Note(int(VELOCITY), int(p), 0.0, dur))
+        inst.notes.append(pretty_midi.Note(
+            velocity=int(VELOCITY),
+            pitch=int(p),
+            start=0.0,
+            end=dur
+        ))
 
     midi.instruments.append(inst)
-    folder = os.path.join(out_dir, "Chords")
-    os.makedirs(folder, exist_ok=True)
-    midi.write(os.path.join(folder, f"{safe_token(chord_name)}{mode_tag}.mid"))
 
-def build_zip_bytes(progressions, revoice: bool) -> tuple[bytes, int]:
+    chords_dir = os.path.join(out_root, "Chords")
+    os.makedirs(chords_dir, exist_ok=True)
+    midi.write(os.path.join(chords_dir, f"{safe_token(chord_name)}.mid"))
+
+
+def zip_pack(out_root: str, zip_path: str):
+    with ZipFile(zip_path, "w") as z:
+        for root, _, files in os.walk(out_root):
+            for f in files:
+                full = os.path.join(root, f)
+                rel = os.path.relpath(full, out_root)
+                z.write(full, arcname=rel)
+
+
+def build_pack(progressions, revoice: bool) -> tuple[str, int]:
     validate_progressions(progressions)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        unique_chords = set()
+    workdir = tempfile.mkdtemp(prefix="aa_midi_")
+    prog_root = os.path.join(workdir, "Pack")
+    os.makedirs(prog_root, exist_ok=True)
 
-        for i, (chords, durations, key_name) in enumerate(progressions, start=1):
-            write_progression_midi(tmp, i, chords, durations, key_name, revoice=revoice)
-            unique_chords.update(chords)
-
-        for ch in sorted(unique_chords):
-            write_single_chord_midi(tmp, ch, revoice=revoice, length_bars=4)
-
-        zip_path = os.path.join(tmp, f"{PACK_NAME}.zip")
-        with ZipFile(zip_path, "w") as z:
-            for root, _, files in os.walk(os.path.join(tmp, "Progressions")):
-                for f in files:
-                    full = os.path.join(root, f)
-                    z.write(full, arcname=os.path.relpath(full, tmp))
-            for root, _, files in os.walk(os.path.join(tmp, "Chords")):
-                for f in files:
-                    full = os.path.join(root, f)
-                    z.write(full, arcname=os.path.relpath(full, tmp))
-
-        with open(zip_path, "rb") as f:
-            data = f.read()
-
-    return data, len(unique_chords)
-
-
-# ================================
-# STREAMLIT UI
-# ================================
-col1, col2 = st.columns([1.2, 1.0], gap="large")
-with col1:
-    n_progressions = st.slider("Progressions to generate", min_value=1, max_value=100, value=10, step=1)
-with col2:
-    revoice = st.toggle("Re-voicing (Inversions)", value=False, help="Smoother voicings, more original MIDI.")
-
-st.divider()
-
-generate = st.button("Generate Pack", use_container_width=True)
-
-# Session state
-if "progressions" not in st.session_state:
-    st.session_state.progressions = None
-if "zip_bytes" not in st.session_state:
-    st.session_state.zip_bytes = None
-if "counts" not in st.session_state:
-    st.session_state.counts = None
-
-if generate:
-    st.session_state.zip_bytes = None
-    st.session_state.progressions = None
-    st.session_state.counts = None
-
-    prog_bar = st.progress(0, text="Generating…")
-
-    seed = int(time.time() * 1000) ^ random.getrandbits(32)
-    progressions, pattern_used, pattern_max, low_sim_total, qual_usage = generate_progressions(
-        n=int(n_progressions),
-        seed=int(seed),
-    )
-
-    prog_bar.progress(35, text="Preparing preview…")
-
+    # Write progressions + unique chord library
     unique_chords = set()
-    bar_counts = Counter()
-    for chords, durs, _k in progressions:
+    for i, (chords, durations, key_name) in enumerate(progressions, start=1):
+        write_progression_midi(prog_root, i, chords, durations, key_name, revoice=revoice)
         unique_chords.update(chords)
-        bar_counts[sum(durs)] += 1
 
-    prog_bar.progress(55, text="Exporting MIDI + building ZIP…")
-    zip_bytes, chord_count = build_zip_bytes(progressions, revoice=revoice)
+    for ch in sorted(unique_chords):
+        write_single_chord_midi(prog_root, ch, revoice=revoice, length_bars=4)
 
-    prog_bar.progress(100, text="Ready ✅")
+    zip_path = os.path.join(workdir, DOWNLOAD_NAME)
+    zip_pack(prog_root, zip_path)
 
-    st.session_state.progressions = progressions
-    st.session_state.zip_bytes = zip_bytes
-    st.session_state.counts = {
-        "progressions": len(progressions),
-        "chords": chord_count,
-        "low_sim_total": low_sim_total,
-        "bars_4": bar_counts.get(4, 0),
-        "bars_8": bar_counts.get(8, 0),
-        "bars_16": bar_counts.get(16, 0),
-        "qualities": dict(qual_usage),
-        "pattern_used": pattern_used,
-        "pattern_max": pattern_max,
-    }
+    return zip_path, len(unique_chords)
 
-# Output / preview
-if st.session_state.progressions:
-    c = st.session_state.counts or {}
 
-    st.markdown("### Summary")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Progressions Generated", c.get("progressions", 0))
-    m2.metric("Individual Chords Generated", c.get("chords", 0))
-    m3.metric("LOW_SIM (must be 0)", c.get("low_sim_total", 0))
-
-    st.caption(f"Bar mix: 4-bar {c.get('bars_4',0)} · 8-bar {c.get('bars_8',0)} · 16-bar {c.get('bars_16',0)}")
-
-    st.markdown("### Preview (first 10)")
+# =========================================================
+# UI HELPERS
+# =========================================================
+def make_rows(progressions):
     rows = []
-    for i, (chords, durs, key) in enumerate(st.session_state.progressions[:10], start=1):
+    for i, (chords, durs, key) in enumerate(progressions, start=1):
         rows.append({
             "#": i,
             "Key": key,
-            "Bars": sum(durs),
+            "Bars": int(sum(durs)),
             "Chords": " – ".join(chords),
             "Durations": str(durs),
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    return rows
 
-    st.divider()
 
-    if st.session_state.zip_bytes:
-        st.download_button(
-            label="Download MIDI Progressions",
-            data=st.session_state.zip_bytes,
-            file_name="MIDI_Progressions_Aural_Alchemy.zip",
-            mime="application/zip",
-            use_container_width=True
-        )
+# =========================================================
+# HERO
+# =========================================================
+st.markdown(
+    f"""
+<div class="aa-hero">
+  <div class="aa-title">{APP_TITLE}</div>
+  <div class="aa-subtitle">{APP_SUBTITLE}</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
-st.markdown("</div>", unsafe_allow_html=True)  # close aa-card
+st.write("")
+
+# =========================================================
+# MAIN PANEL
+# =========================================================
+st.markdown('<div class="aa-panel">', unsafe_allow_html=True)
+
+# Center slider + toggle
+sp_left, sp_center, sp_right = st.columns([1, 2, 1])
+with sp_center:
+    n_progressions = st.slider(
+        "Progressions to Generate",
+        min_value=1,
+        max_value=100,
+        value=10,
+        help="Generates a balanced mix of 4, 8, and 16-bar loops."
+    )
+    revoice = st.toggle(
+        "Re-Voicing",
+        value=False,
+        help="Smooth voicings + inversions for a more premium, musical feel."
+    )
+
+st.write("")
+
+btn_left, btn_center, btn_right = st.columns([1, 2, 1])
+with btn_center:
+    generate_clicked = st.button("Generate Progressions", use_container_width=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+st.write("")
+
+# =========================================================
+# RUN GENERATION
+# =========================================================
+if generate_clicked:
+    with st.status("Generating pack…", expanded=False) as status:
+        try:
+            seed = int(np.random.randint(1, 2_000_000_000))
+
+            status.update(label="Composing progressions…", state="running")
+            progressions, pattern_dupe_used, pattern_dupe_max, low_sim_total, qual_usage = generate_progressions(
+                n=int(n_progressions),
+                seed=seed
+            )
+
+            # Hard guarantee: low-sim must be zero
+            if low_sim_total != 0:
+                raise RuntimeError("Safety check failed: low-sim transitions detected.")
+
+            status.update(label="Exporting MIDI + chords…", state="running")
+            zip_path, chord_count = build_pack(progressions, revoice=bool(revoice))
+
+            # Store in session
+            st.session_state.progressions = progressions
+            st.session_state.zip_path = zip_path
+            st.session_state.progression_count = len(progressions)
+            st.session_state.chord_count = chord_count
+
+            status.update(label="Ready.", state="complete")
+
+        except Exception as e:
+            st.session_state.pop("zip_path", None)
+            st.session_state.pop("progressions", None)
+            st.session_state.progression_count = 0
+            st.session_state.chord_count = 0
+            st.error(f"Error: {e}")
+
+# =========================================================
+# SUMMARY + DOWNLOAD + TABLE
+# =========================================================
+if "progressions" in st.session_state and st.session_state.get("zip_path"):
+    # Summary panel (with watermark only behind summary)
+    st.markdown('<div class="aa-panel" style="position:relative;">', unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='aa-summary-watermark' style=\"background-image:url('{SUMMARY_WM_URI}');\"></div>",
+        unsafe_allow_html=True
+    )
+
+    a, b = st.columns(2)
+    a.metric("Progressions Generated", int(st.session_state.get("progression_count", 0)))
+    b.metric("Individual Chords Generated", int(st.session_state.get("chord_count", 0)))
+
+    st.write("")
+
+    # Download button (fixed filename)
+    try:
+        with open(st.session_state.zip_path, "rb") as f:
+            zip_bytes = f.read()
+
+        dl_left, dl_center, dl_right = st.columns([1, 2, 1])
+        with dl_center:
+            st.download_button(
+                label="Download MIDI Progressions",
+                data=zip_bytes,
+                file_name=DOWNLOAD_NAME,
+                mime="application/zip",
+                use_container_width=True
+            )
+    except Exception as e:
+        st.error(f"Could not read ZIP for download: {e}")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.write("")
+
+    # Show all progressions
+    rows = make_rows(st.session_state.progressions)
+    df = pd.DataFrame(rows)
+
+    st.markdown('<div class="aa-panel">', unsafe_allow_html=True)
+    st.markdown("### Progressions (all)")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    with st.expander("Preview first 10"):
+        st.dataframe(df.head(10), use_container_width=True, hide_index=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# Small footer spacing
+st.write("")
+st.write("")
+
