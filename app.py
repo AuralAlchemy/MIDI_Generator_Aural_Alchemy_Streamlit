@@ -32,7 +32,6 @@ st.set_page_config(
 )
 
 APP_TITLE = "AURAL ALCHEMY"
-APP_EDITION = "MIDI GENERATOR"
 APP_SUBTITLE = "Endless Ambient MIDI Progressions Ready To Drop Into Any DAW"
 DOWNLOAD_NAME = "MIDI_Progressions_Aural_Alchemy.zip"
 
@@ -131,48 +130,6 @@ button, .stButton>button,
   background-clip: text;
   color: transparent;
   text-shadow: 0 12px 30px rgba(0,0,0,0.55);
-}
-  
-.aa-edition{
-  margin-top: 10px;
-  display: inline-block;                 /* important */
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 6px;
-  text-transform: uppercase;
-
-  background: linear-gradient(
-    90deg,
-    rgba(255,255,255,0.92),
-    rgba(0,229,255,0.95),
-    rgba(255,215,0,0.92)
-  );
-
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;  /* THIS is the missing piece */
-
-  opacity: 1;                            /* don’t fade it or it looks like subtitle */
-  text-shadow: 0 10px 24px rgba(0,0,0,0.45);
-  position: relative;
-}
-
-
-/* subtle thin line under it (cinematic touch) */
-.aa-edition::after{
-  content: "";
-  display: block;
-  width: 120px;
-  height: 1px;
-  margin: 10px auto 0 auto;
-
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,0.25),
-    transparent
-  );
 }
 .aa-subtitle {
   margin-top: 8px;
@@ -1187,7 +1144,6 @@ st.markdown(
     f"""
 <div class="aa-hero">
   <div class="aa-title">{APP_TITLE}</div>
-  <div class="aa-edition">{APP_EDITION}</div>
   <div class="aa-subtitle">{APP_SUBTITLE}</div>
 </div>
 """,
@@ -1300,6 +1256,10 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
 
     st.markdown("### Progressions List")
     st.dataframe(df, use_container_width=True, hide_index=True)
+  
+
+
+
   
 
 
