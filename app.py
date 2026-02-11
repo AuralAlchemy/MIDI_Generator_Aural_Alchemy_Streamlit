@@ -35,6 +35,7 @@ APP_TITLE = "AURAL ALCHEMY"
 APP_SUBTITLE = "Endless Ambient MIDI Progressions"
 DOWNLOAD_NAME = "MIDI_Progressions_Aural_Alchemy.zip"
 
+
 # =========================================================
 # PREMIUM CSS (Cinzel everywhere + cyan slider + shimmer + glows)
 # =========================================================
@@ -71,7 +72,6 @@ button, .stButton>button,
   pointer-events: none;
   z-index: 0;
   opacity: 0.58;
-  filter: blur(0px);
 }
 .aa-geom {
   position: absolute;
@@ -99,6 +99,7 @@ button, .stButton>button,
   border: 1px solid rgba(255,255,255,0.10);
   box-shadow: 0 18px 60px rgba(0,0,0,0.45);
   backdrop-filter: blur(8px);
+  text-align: center; /* ✅ center title/subtitle */
 }
 .aa-title {
   font-size: 46px;
@@ -141,22 +142,24 @@ button, .stButton>button,
   background-repeat: no-repeat;
   background-position: center;
   background-size: 650px 650px;
-  filter: blur(0px);
 }
 
-/* Cyan slider styling (BaseWeb) */
-div[data-baseweb="slider"] div[role="slider"]{
-  background: rgba(0, 229, 255, 0.95) !important;
+/* Cyan slider styling (Streamlit/BaseWeb - strong) */
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="slider"]{
+  background: rgba(0, 229, 255, 0.98) !important;
+  border: 1px solid rgba(0,229,255,0.40) !important;
   box-shadow:
     0 0 0 6px rgba(0,229,255,0.10),
-    0 8px 25px rgba(0,229,255,0.20) !important;
-  border: 1px solid rgba(0,229,255,0.35) !important;
+    0 10px 28px rgba(0,229,255,0.22) !important;
 }
-div[data-baseweb="slider"] div[role="presentation"] > div{
-  background: rgba(0, 229, 255, 0.55) !important;
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] > div{
+  background: rgba(0, 229, 255, 0.60) !important;
 }
-div[data-baseweb="slider"] div[role="presentation"] > div + div{
-  background: rgba(255,255,255,0.08) !important;
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] > div + div{
+  background: rgba(255,255,255,0.10) !important;
+}
+[data-testid="stSlider"] *{
+  accent-color: rgba(0,229,255,0.98) !important;
 }
 
 /* Toggle glow when active */
@@ -306,7 +309,6 @@ SCALES = {
     "B":  ["B","C#","D#","E","F#","G#","A#"],
 }
 
-# Canonical interval formulas (PC-safe + note-count safe)
 QUAL_TO_INTERVALS = {
     "maj":        [0,4,7],
     "min":        [0,3,7],
@@ -399,7 +401,6 @@ MAX_BIG_JUMPS_PER_PROG = 1
 SUS_WEIGHT_MULT = 0.50
 SUS_UPGRADE_PROB = 0.50
 
-# Quality pools
 MAJ_POOL = [("maj9", 10), ("maj7", 9), ("add9", 7), ("6add9", 6), ("6", 4), ("maj", 2)]
 MIN_POOL = [("min9", 10), ("min7", 9), ("min11", 4), ("min", 2)]
 SUS_POOL = [("sus2add9", 10), ("sus4add9", 10), ("sus2", 2), ("sus4", 2)]
@@ -428,7 +429,6 @@ SAFE_FALLBACK_ORDER = [
     "sus2add9","sus4add9","sus2","sus4"
 ]
 
-# Degree templates
 TEMPLATES_BY_LEN = {
     2: [((0,3), 10), ((0,5), 7), ((5,3), 5), ((3,0), 4), ((0,4), 3)],
     3: [
@@ -450,7 +450,6 @@ def _pick_template_degs(rng: random.Random, m: int) -> list:
     return list(_wchoice(rng, TEMPLATES_BY_LEN[m]))
 
 
-# Durations
 DURATIONS = {
     (2, 4):  [([2,2], 10)],
     (3, 4):  [([2,1,1], 10), ([1,1,2], 8)],
@@ -499,19 +498,16 @@ def _pick_quality_diatonic(rng: random.Random, key: str, deg: int) -> str:
     for _ in range(200):
         q = _wchoice(rng, pool)
 
-        # Upgrade bare sus to sus*add9 often (keep bare sus rare)
         if q in ("sus2", "sus4") and rng.random() < SUS_UPGRADE_PROB:
             if rng.random() >= BARE_SUS_PROB:
                 q = "sus2add9" if q == "sus2" else "sus4add9"
 
-        # Keep triads rare most of the time
         if q in ("maj", "min") and (not triad_boost) and rng.random() < 0.85:
             continue
 
         if _is_diatonic_chord(key, root, q):
             return q
 
-    # Fallback guaranteed diatonic
     for q in SAFE_FALLBACK_ORDER:
         if _is_diatonic_chord(key, root, q):
             return q
@@ -532,7 +528,6 @@ def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: 
             used.add(sym)
             continue
 
-        # try other qualities on same root
         candidate_quals = SAFE_FALLBACK_ORDER[:]
         rng.shuffle(candidate_quals)
         fixed = False
@@ -549,7 +544,6 @@ def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: 
         if fixed:
             continue
 
-        # else nudge degree
         neighbor_steps = [1, -1, 2, -2, 3, -3]
         rng.shuffle(neighbor_steps)
         for stp in neighbor_steps:
@@ -590,15 +584,12 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
 
     roots = [SCALES[key][d] for d in degs]
 
-    # hard diatonic
     if any(not _is_diatonic_chord(key, r, q) for r, q in zip(roots, quals)):
         return None
 
-    # hard no LOW_SIM (adjacent + loop)
-    if not _shared_tone_ok_loop(roots, quals, need=MIN_SHARED_TONES, loop=ENFORCE_LOOP_OK):
+    if not _shared_tone_ok_loop(roots, quals, need=1, loop=True):
         return None
 
-    # note-count jump limiter
     if LIMIT_NOTECOUNT_JUMPS:
         big = 0
         for a, b in zip(quals, quals[1:]):
@@ -636,7 +627,7 @@ def generate_progressions(n: int, seed: int):
     rng = random.Random(seed)
     keys = _pick_keys_even(n, rng)
 
-    max_pattern_dupes = int(math.floor(n * MAX_PATTERN_DUPLICATE_RATIO))
+    max_pattern_dupes = int(math.floor(n * 0.01))
     pattern_dupe_used = 0
 
     used_exact = set()
@@ -668,7 +659,6 @@ def generate_progressions(n: int, seed: int):
             if pattern_counts[fp] >= PATTERN_MAX_REPEATS and pattern_dupe_used >= max_pattern_dupes:
                 continue
 
-            # accept
             used_exact.add(ek)
             if pattern_counts[fp] >= 1:
                 pattern_dupe_used += 1
@@ -683,10 +673,7 @@ def generate_progressions(n: int, seed: int):
             break
 
         if built is None:
-            raise RuntimeError(
-                f"Could not build progression {i+1}. Space too constrained. "
-                f"Increase templates/durations or loosen duplicate caps."
-            )
+            raise RuntimeError(f"Could not build progression {i+1}. Space too constrained.")
 
         out.append(built)
 
@@ -979,7 +966,6 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     out_dir = os.path.join(out_root, "Progressions", BAR_DIR[total_bars])
     os.makedirs(out_dir, exist_ok=True)
 
-    # Keep internal filename descriptive; download ZIP name is fixed.
     filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}_{chord_list_token(chords)}.mid"
     midi.write(os.path.join(out_dir, filename))
 
@@ -1024,7 +1010,6 @@ def build_pack(progressions, revoice: bool) -> tuple[str, int]:
     prog_root = os.path.join(workdir, "Pack")
     os.makedirs(prog_root, exist_ok=True)
 
-    # Write progressions + unique chord library
     unique_chords = set()
     for i, (chords, durations, key_name) in enumerate(progressions, start=1):
         write_progression_midi(prog_root, i, chords, durations, key_name, revoice=revoice)
@@ -1050,7 +1035,6 @@ def make_rows(progressions):
             "Key": key,
             "Bars": int(sum(durs)),
             "Chords": " – ".join(chords),
-            "Durations": str(durs),
         })
     return rows
 
@@ -1068,14 +1052,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.write("")
-
 # =========================================================
 # MAIN PANEL
 # =========================================================
 st.markdown('<div class="aa-panel">', unsafe_allow_html=True)
 
-# Center slider + toggle
 sp_left, sp_center, sp_right = st.columns([1, 2, 1])
 with sp_center:
     n_progressions = st.slider(
@@ -1091,21 +1072,17 @@ with sp_center:
         help="Smooth voicings + inversions for a more premium, musical feel."
     )
 
-st.write("")
-
 btn_left, btn_center, btn_right = st.columns([1, 2, 1])
 with btn_center:
     generate_clicked = st.button("Generate Progressions", use_container_width=True)
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-st.write("")
-
 # =========================================================
 # RUN GENERATION
 # =========================================================
 if generate_clicked:
-    with st.status("Generating pack…", expanded=False) as status:
+    with st.status("Generating progressions…", expanded=False) as status:
         try:
             seed = int(np.random.randint(1, 2_000_000_000))
 
@@ -1115,14 +1092,12 @@ if generate_clicked:
                 seed=seed
             )
 
-            # Hard guarantee: low-sim must be zero
             if low_sim_total != 0:
                 raise RuntimeError("Safety check failed: low-sim transitions detected.")
 
             status.update(label="Exporting MIDI + chords…", state="running")
             zip_path, chord_count = build_pack(progressions, revoice=bool(revoice))
 
-            # Store in session
             st.session_state.progressions = progressions
             st.session_state.zip_path = zip_path
             st.session_state.progression_count = len(progressions)
@@ -1141,7 +1116,6 @@ if generate_clicked:
 # SUMMARY + DOWNLOAD + TABLE
 # =========================================================
 if "progressions" in st.session_state and st.session_state.get("zip_path"):
-    # Summary panel (with watermark only behind summary)
     st.markdown('<div class="aa-panel" style="position:relative;">', unsafe_allow_html=True)
     st.markdown(
         f"<div class='aa-summary-watermark' style=\"background-image:url('{SUMMARY_WM_URI}');\"></div>",
@@ -1152,9 +1126,6 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
     a.metric("Progressions Generated", int(st.session_state.get("progression_count", 0)))
     b.metric("Individual Chords Generated", int(st.session_state.get("chord_count", 0)))
 
-    st.write("")
-
-    # Download button (fixed filename)
     try:
         with open(st.session_state.zip_path, "rb") as f:
             zip_bytes = f.read()
@@ -1173,23 +1144,13 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    st.write("")
-
-    # Show all progressions
     rows = make_rows(st.session_state.progressions)
     df = pd.DataFrame(rows)
 
     st.markdown('<div class="aa-panel">', unsafe_allow_html=True)
     st.markdown("### Progressions (all)")
     st.dataframe(df, use_container_width=True, hide_index=True)
-
-    with st.expander("Preview first 10"):
-        st.dataframe(df.head(10), use_container_width=True, hide_index=True)
-
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Small footer spacing
-st.write("")
-st.write("")
 
 
