@@ -27,7 +27,7 @@ import pretty_midi
 st.set_page_config(
     page_title="Aural Alchemy • MIDI Progressions",
     page_icon="✨",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
