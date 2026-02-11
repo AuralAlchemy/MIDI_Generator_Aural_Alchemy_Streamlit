@@ -4,6 +4,7 @@
 # - Exports a ZIP containing: Progressions (4/8/16-bar folders) + Individual Chords library
 # - Optional Re-Voicing (inversions/voicing engine)
 # - Premium UI styling (Cinzel font everywhere, cyan slider, gold shimmer button, soft glows)
+# - NEW: slow rotating sacred geometry mandala overlay (two layers)
 
 import os
 import re
@@ -47,7 +48,7 @@ st.markdown(
 /* FORCE STREAMLIT THEME PRIMARY COLOR (affects slider fill + toggle ON) */
 :root {
   --primary-color: #00E5FF !important;
-  --primaryColor: #00E5FF !important;            /* some builds */
+  --primaryColor: #00E5FF !important;
   --primary-color-light: rgba(0,229,255,0.35) !important;
 }
 
@@ -58,7 +59,6 @@ st.markdown(
   --primary-color: #00E5FF !important;
   --primaryColor: #00E5FF !important;
 }
-
 
 html, body, [class*="css"], .stApp, .block-container,
 h1, h2, h3, h4, h5, h6,
@@ -72,7 +72,7 @@ button, .stButton>button,
   letter-spacing: 0.55px !important;
 }
 
-/* ---- Page background (sacred geometry) ---- */
+/* ---- Page background (gradient base) ---- */
 .stApp {
   background:
     radial-gradient(1200px 700px at 20% 15%, rgba(0,229,255,0.10), rgba(0,0,0,0) 60%),
@@ -81,27 +81,56 @@ button, .stButton>button,
     linear-gradient(180deg, #070A10 0%, #07080E 35%, #05060A 100%);
 }
 
-/* Geometry overlay container */
-.aa-geom-wrap {
+/* =========================================================
+   NEW: SACRED GEOMETRY OVERLAY (two layers + slow rotation)
+   - Keep this ONLY (removed old .aa-geom / aaSlowSpin)
+========================================================= */
+.aa-geom-wrap{
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.58;
+  opacity: 0.90; /* overall container strength */
 }
-.aa-geom {
+
+.aa-geom-1,
+.aa-geom-2{
   position: absolute;
-  inset: -10%;
+  inset: -18%;
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 1200px 1200px;
-  animation: aaSlowSpin 48s linear infinite;
-  opacity: 0.32;
+  background-size: min(1200px, 90vw) min(1200px, 90vw);
+  will-change: transform, opacity;
+  mix-blend-mode: screen;
 }
-@keyframes aaSlowSpin {
+
+/* Layer 1: crisp lines, slow spin */
+.aa-geom-1{
+  opacity: 0.28;
+  filter: blur(0.2px) drop-shadow(0 0 24px rgba(0,229,255,0.12));
+  animation: aaSpin1 80s linear infinite;
+}
+
+/* Layer 2: softer glow, reverse spin + subtle breathing */
+.aa-geom-2{
+  opacity: 0.18;
+  filter: blur(0.9px) drop-shadow(0 0 36px rgba(255,215,0,0.10));
+  animation: aaSpin2 110s linear infinite, aaBreathe 8.5s ease-in-out infinite;
+}
+
+@keyframes aaSpin1{
   0%   { transform: rotate(0deg) scale(1.02); }
-  50%  { transform: rotate(180deg) scale(1.01); }
   100% { transform: rotate(360deg) scale(1.02); }
+}
+
+@keyframes aaSpin2{
+  0%   { transform: rotate(0deg) scale(1.04); }
+  100% { transform: rotate(-360deg) scale(1.04); }
+}
+
+@keyframes aaBreathe{
+  0%, 100% { opacity: 0.16; }
+  50%      { opacity: 0.22; }
 }
 
 /* Header */
@@ -115,31 +144,22 @@ button, .stButton>button,
   border: 1px solid rgba(255,255,255,0.10);
   box-shadow: 0 18px 60px rgba(0,0,0,0.45);
   backdrop-filter: blur(8px);
-  text-align: center; /* ✅ center title/subtitle */
+  text-align: center;
   margin-bottom: 26px;
 }
 .aa-title {
-  font-size: clamp(30px, 7vw, 46px);
+  font-size: 46px;
   font-weight: 700;
-  letter-spacing: clamp(1px, 0.6vw, 3.2px);
+  letter-spacing: 3.2px !important;
   line-height: 1.05;
   margin: 0;
   padding: 0;
-  white-space: normal;
-  word-break: keep-all;
-
-  background: linear-gradient(
-    90deg,
-    rgba(255,255,255,0.98),
-    rgba(0,229,255,0.90),
-    rgba(255,215,0,0.92)
-  );
+  background: linear-gradient(90deg, rgba(255,255,255,0.98), rgba(0,229,255,0.90), rgba(255,215,0,0.92));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   text-shadow: 0 12px 30px rgba(0,0,0,0.55);
 }
-
 .aa-subtitle {
   margin-top: 8px;
   font-size: 16px;
@@ -158,7 +178,6 @@ button, .stButton>button,
   box-shadow: 0 18px 60px rgba(0,0,0,0.42);
   backdrop-filter: blur(8px);
 }
-
 
 /* Summary watermark only behind summary section */
 .aa-summary-watermark {
@@ -251,16 +270,7 @@ div[data-baseweb="toggle"] input:checked + div{
 /* Reduce top whitespace */
 .block-container { padding-top: 1.0rem !important; }
 
-/* === FORCE SLIDER TRACK COLORS (kill orange) === */
-[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] div{
-  background: rgba(0,229,255,0.55) !important;          /* filled track */
-}
-[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] div:last-child{
-  background: rgba(255,255,255,0.10) !important;        /* remaining track */
-}
-[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"]{
-  background: transparent !important;
-}
+/* Ready badge */
 .aa-ready-wrap{
   display:flex;
   justify-content:center;
@@ -288,55 +298,47 @@ div[data-baseweb="toggle"] input:checked + div{
   background: rgba(0,229,255,0.95);
   box-shadow: 0 0 18px rgba(0,229,255,0.60);
 }
+
+/* Hide empty markdown paragraphs that add tiny artifacts */
 div[data-testid="stMarkdownContainer"] > p:empty {
   display: none !important;
 }
+
 /* =========================
    NUCLEAR: KILL STREAMLIT RED/ORANGE PRIMARY
-   (works even when Streamlit changes DOM)
-   Put this at the VERY END of the <style>
 ========================= */
-
-/* Slider - force filled/unfilled track + thumb */
 [data-testid="stSlider"] * {
   --primary-color: #00E5FF !important;
   --primaryColor: #00E5FF !important;
 }
-
-/* Thumb */
 [data-testid="stSlider"] div[role="slider"]{
   background-color: #00E5FF !important;
   border-color: rgba(0,229,255,0.55) !important;
   box-shadow: 0 0 0 6px rgba(0,229,255,0.10), 0 10px 28px rgba(0,229,255,0.22) !important;
 }
-
-/* Track pieces (Streamlit/BaseWeb versions vary, so we hit multiple) */
 [data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] div{
-  background-color: rgba(0,229,255,0.60) !important;   /* filled */
+  background-color: rgba(0,229,255,0.60) !important;
   background: rgba(0,229,255,0.60) !important;
 }
 [data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] div:last-child{
-  background-color: rgba(255,255,255,0.12) !important; /* remaining */
+  background-color: rgba(255,255,255,0.12) !important;
   background: rgba(255,255,255,0.12) !important;
 }
-
-/* Toggle - force active track color (not just glow) */
 [data-baseweb="toggle"] div[aria-checked="true"]{
   background-color: rgba(0,229,255,0.55) !important;
   box-shadow: 0 0 18px rgba(0,229,255,0.45) !important;
 }
 [data-baseweb="toggle"] div[aria-checked="true"] > div{
-  background-color: #00E5FF !important; /* knob */
+  background-color: #00E5FF !important;
 }
-
-
-
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# Geometry SVG overlay (circle + triangle + rings)
+# =========================================================
+# Geometry SVG overlay (DATA URI)
+# =========================================================
 GEOM_SVG = """
 <svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -382,14 +384,17 @@ SUMMARY_WATERMARK_SVG = """
 """
 SUMMARY_WM_URI = "data:image/svg+xml;utf8," + re.sub(r"\s+", " ", SUMMARY_WATERMARK_SVG).replace("#", "%23")
 
+# NEW: two-layer overlay (same SVG used twice; CSS differentiates layers)
 st.markdown(
     f"""
 <div class="aa-geom-wrap">
-  <div class="aa-geom" style="background-image:url('{GEOM_DATA_URI}');"></div>
+  <div class="aa-geom-1" style="background-image:url('{GEOM_DATA_URI}');"></div>
+  <div class="aa-geom-2" style="background-image:url('{GEOM_DATA_URI}');"></div>
 </div>
 """,
     unsafe_allow_html=True,
 )
+
 
 # =========================================================
 # MUSICAL DATA + SAFE CHORD DEFINITIONS (define BEFORE generator)
@@ -1162,8 +1167,6 @@ st.markdown(
 # =========================================================
 # MAIN PANEL
 # =========================================================
-
-
 sp_left, sp_center, sp_right = st.columns([1, 2, 1])
 with sp_center:
     n_progressions = st.slider(
@@ -1184,7 +1187,6 @@ with btn_center:
     generate_clicked = st.button("Generate Progressions", use_container_width=True)
 
 
-
 # =========================================================
 # RUN GENERATION
 # =========================================================
@@ -1198,26 +1200,24 @@ if generate_clicked:
                 seed=seed
             )
 
-            # Hard guarantee: low-sim must be zero
             if low_sim_total != 0:
                 raise RuntimeError("Safety check failed: low-sim transitions detected.")
 
             zip_path, chord_count = build_pack(progressions, revoice=bool(revoice))
 
-            # Store in session
             st.session_state.progressions = progressions
             st.session_state.zip_path = zip_path
             st.session_state.progression_count = len(progressions)
             st.session_state.chord_count = chord_count
 
         st.markdown(
-    """
-    <div class="aa-ready-wrap">
-      <div class="aa-ready-badge"><span class="aa-ready-dot"></span>READY</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+            """
+            <div class="aa-ready-wrap">
+              <div class="aa-ready-badge"><span class="aa-ready-dot"></span>READY</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     except Exception as e:
         st.session_state.pop("zip_path", None)
@@ -1231,7 +1231,7 @@ if generate_clicked:
 # SUMMARY + DOWNLOAD + TABLE
 # =========================================================
 if "progressions" in st.session_state and st.session_state.get("zip_path"):
-    
+
     st.markdown(
         f"<div class='aa-summary-watermark' style=\"background-image:url('{SUMMARY_WM_URI}');\"></div>",
         unsafe_allow_html=True
@@ -1257,19 +1257,14 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
     except Exception as e:
         st.error(f"Could not read ZIP for download: {e}")
 
-   
-
     rows = make_rows(st.session_state.progressions)
     df = pd.DataFrame(rows)
 
-
     st.markdown("### Progressions List")
     st.dataframe(df, use_container_width=True, hide_index=True)
-  
-
-
 
   
+
 
 
 
