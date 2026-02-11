@@ -100,6 +100,7 @@ button, .stButton>button,
   box-shadow: 0 18px 60px rgba(0,0,0,0.45);
   backdrop-filter: blur(8px);
   text-align: center; /* ✅ center title/subtitle */
+  margin-bottom: 26px;
 }
 .aa-title {
   font-size: 46px;
