@@ -1067,7 +1067,7 @@ st.markdown(
 # =========================================================
 # MAIN PANEL
 # =========================================================
-st.markdown('<div class="aa-panel">', unsafe_allow_html=True)
+
 
 sp_left, sp_center, sp_right = st.columns([1, 2, 1])
 with sp_center:
@@ -1088,7 +1088,7 @@ btn_left, btn_center, btn_right = st.columns([1, 2, 1])
 with btn_center:
     generate_clicked = st.button("Generate Progressions", use_container_width=True)
 
-st.markdown("</div>", unsafe_allow_html=True)
+
 
 # =========================================================
 # RUN GENERATION
@@ -1154,15 +1154,15 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
     except Exception as e:
         st.error(f"Could not read ZIP for download: {e}")
 
-    st.markdown("</div>", unsafe_allow_html=True)
+   
 
     rows = make_rows(st.session_state.progressions)
     df = pd.DataFrame(rows)
 
-    st.markdown('<div class="aa-panel">', unsafe_allow_html=True)
+
     st.markdown("### Progressions (all)")
     st.dataframe(df, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+  
 
 
 
