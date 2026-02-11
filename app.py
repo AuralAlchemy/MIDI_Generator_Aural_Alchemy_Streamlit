@@ -102,8 +102,14 @@ button, .stButton>button,
   background-position: center;
   background-size: min(1200px, 90vw) min(1200px, 90vw);
   will-change: transform, opacity;
-  mix-blend-mode: screen;
+
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  contain: paint;
+
+  mix-blend-mode: normal;
 }
+
 
 /* Layer 1: crisp lines, slow spin */
 .aa-geom-1{
