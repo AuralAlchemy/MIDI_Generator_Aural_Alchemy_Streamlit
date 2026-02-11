@@ -32,7 +32,7 @@ st.set_page_config(
 )
 
 APP_TITLE = "AURAL ALCHEMY"
-APP_SUBTITLE = "Endless Ambient MIDI Progressions"
+APP_SUBTITLE = "Endless Ambient MIDI Progressions Ready To Drop Into Any DAW"
 DOWNLOAD_NAME = "MIDI_Progressions_Aural_Alchemy.zip"
 
 
@@ -1254,7 +1254,7 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
     df = pd.DataFrame(rows)
 
 
-    st.markdown("### Progressions (all)")
+    st.markdown("### Progressions List")
     st.dataframe(df, use_container_width=True, hide_index=True)
   
 
