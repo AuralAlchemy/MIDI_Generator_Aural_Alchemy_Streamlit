@@ -1180,7 +1180,7 @@ with sp_center:
     revoice = st.toggle(
         "Re-Voicing",
         value=False,
-        help="Smooth voicings + inversions for a more original feel."
+        help="Repositions the notes within each chord for smoother movement and a more original sound."
     )
 
 btn_left, btn_center, btn_right = st.columns([1, 2, 1])
