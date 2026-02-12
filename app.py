@@ -72,7 +72,7 @@ st.markdown(
 
 html, body, [class*="css"], .stApp, .block-container,
 h1, h2, h3, h4, h5, h6,
-p, span, div, label,
+p, label,
 button, .stButton>button,
 [data-testid="stMetricLabel"],
 [data-testid="stMetricValue"],
@@ -81,6 +81,15 @@ button, .stButton>button,
   font-family: "Cinzel", serif !important;
   letter-spacing: 0.55px !important;
 }
+/* ✅ Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
+[data-baseweb="icon"], 
+[data-baseweb="icon"] *,
+svg, svg * {
+  font-family: "Material Icons", "Material Symbols Outlined", system-ui, sans-serif !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
 
 /* ---- Page background ---- */
 .stApp {
