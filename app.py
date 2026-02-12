@@ -826,8 +826,22 @@ MAX_SPAN = 19
 MAX_SHARED_DEFAULT = 2
 MAX_SHARED_MIN11 = 3
 
+# Old switch no longer used for glue logic (kept for compatibility)
 DISALLOW_GLUE = False
 ENFORCE_NOT_RAW_WHEN_VOICING = True
+
+# =====================================
+# Controlled Glue Rule (Aural Alchemy)
+# =====================================
+GLUE_LOW_CUTOFF = 48      # C3
+GLUE_PROBABILITY = 0.30   # chance to allow glue above C3
+
+# =====================================
+# Cross-chord semitone resolution options
+# Tonic always allowed. Third/fifth optional.
+# =====================================
+ALLOW_RESOLVE_TO_THIRD = True
+ALLOW_RESOLVE_TO_FIFTH = False
 
 
 def parse_root_and_bass(ch: str):
@@ -905,11 +919,6 @@ def has_glued_semitones(notes):
     s = sorted(notes)
     return any((s[i + 1] - s[i]) == 1 for i in range(len(s) - 1))
 
-# =====================================
-# Controlled Glue Rule (Aural Alchemy)
-# =====================================
-GLUE_LOW_CUTOFF = 48      # C3
-GLUE_PROBABILITY = 0.30   # chance to allow glue above C3
 
 def semitone_pairs(notes: List[int]):
     s = sorted(set(notes))
@@ -918,6 +927,7 @@ def semitone_pairs(notes: List[int]):
         if (s[i + 1] - s[i]) == 1:
             pairs.append((s[i], s[i + 1]))
     return pairs
+
 
 def glue_ok(notes: List[int], rng: random.Random) -> bool:
     pairs = semitone_pairs(notes)
@@ -931,7 +941,6 @@ def glue_ok(notes: List[int], rng: random.Random) -> bool:
 
     # Above C3, allow glue only sometimes
     return rng.random() < GLUE_PROBABILITY
-
 
 
 def shared_pitch_count(a, b):
@@ -986,26 +995,114 @@ def generate_voicing_candidates(raw_notes):
     return out if out else [base]
 
 
+# =====================================
+# Cross-chord semitone rule (key-aware)
+# Adjacent semitones between chords are ONLY allowed
+# if the CURRENT note resolves into tonic, and optionally 3rd/5th.
+# =====================================
+
+def allowed_resolution_pcs(key: str) -> set:
+    # Tonic always allowed
+    pcs = set()
+    tonic = NOTE_TO_PC[SCALES[key][0]]
+    pcs.add(tonic)
+
+    if ALLOW_RESOLVE_TO_THIRD:
+        third = NOTE_TO_PC[SCALES[key][2]]
+        pcs.add(third)
+
+    if ALLOW_RESOLVE_TO_FIFTH:
+        fifth = NOTE_TO_PC[SCALES[key][4]]
+        pcs.add(fifth)
+
+    return pcs
+
+
+def bad_cross_semitone_indices(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set) -> List[int]:
+    """
+    Indices in cur_notes that are ±1 semitone away from ANY note in prev_notes,
+    where the cur note PC is NOT an allowed resolution target.
+    """
+    prev_set = set(prev_notes)
+    cur = list(cur_notes)
+    bad = []
+    for i, n in enumerate(cur):
+        if (n - 1) in prev_set or (n + 1) in prev_set:
+            if (n % 12) not in allowed_target_pcs:
+                bad.append(i)
+    return bad
+
+
+def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set, max_iters: int = 8) -> List[int]:
+    """
+    Fix bad cross-chord semitone adjacencies by octave-shifting ONLY offending notes.
+    No chord changes, only ±12 moves within LOW/HIGH and avoiding duplicate pitches.
+    """
+    v = sorted(list(cur_notes))
+
+    for _ in range(max_iters):
+        bad_idxs = bad_cross_semitone_indices(prev_notes, v, allowed_target_pcs)
+        if not bad_idxs:
+            break
+
+        changed_any = False
+        for idx in bad_idxs:
+            n = v[idx]
+
+            options = []
+            for delta in (+12, -12):
+                n2 = n + delta
+                if n2 < LOW or n2 > HIGH:
+                    continue
+                if n2 in v:
+                    continue
+
+                test = v[:]
+                test[idx] = n2
+                test = sorted(test)
+
+                remaining = len(bad_cross_semitone_indices(prev_notes, test, allowed_target_pcs))
+                options.append((remaining, abs(center(test) - TARGET_CENTER), test))
+
+            if options:
+                options.sort(key=lambda x: (x[0], x[1]))
+                v = options[0][2]
+                changed_any = True
+
+        if not changed_any:
+            break
+
+    return v
+
+
 def choose_best_voicing(
     prev_voicing: Optional[List[int]],
     prev_name: str,
     cur_name: str,
     raw_notes: List[int],
+    key_name: str,
     rng: random.Random
 ) -> List[int]:
     cands = generate_voicing_candidates(raw_notes)
     raw_clamped = clamp_to_range(raw_notes)
 
-    # Controlled glue: never below C3, above C3 only sometimes
+    # 1) Controlled glue: never below C3, above C3 only sometimes
     filtered = [v for v in cands if glue_ok(v, rng)]
     if filtered:
         cands = filtered
 
+    # 2) Key-aware cross-chord semitone repair (do NOT remove candidates)
+    if prev_voicing is not None:
+        allowed_pcs = allowed_resolution_pcs(key_name)
+        cands = [repair_cross_semitones(prev_voicing, v, allowed_pcs) for v in cands]
+
+    # 3) Avoid raw shape (if enabled)
     if ENFORCE_NOT_RAW_WHEN_VOICING:
         non_raw = [v for v in cands if not is_raw_shape(v, raw_clamped)]
         if non_raw:
             cands = non_raw
 
+    # 4) Limit shared exact pitches with previous voicing (if possible)
     if prev_voicing is not None:
         limit = max_shared_allowed(prev_name, cur_name)
         filtered = [v for v in cands if shared_pitch_count(prev_voicing, v) <= limit]
@@ -1036,12 +1133,22 @@ def choose_best_voicing(
                 shared_pen = (sh - limit) * 6000
 
         raw_pen = 100000 if (ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped)) else 0
-        glue_pen = 20000 if (DISALLOW_GLUE and has_glued_semitones(v)) else 0
 
-        return reg_pen + span_pen + move_pen + repeat_pen + shared_pen + raw_pen + glue_pen
+        # Heavy penalty if any bad cross-chord semitone still remains after repair
+        cross_pen = 0
+        if prev_voicing is not None:
+            allowed_pcs = allowed_resolution_pcs(key_name)
+            bad_left = len(bad_cross_semitone_indices(prev_voicing, v, allowed_pcs))
+            cross_pen = bad_left * 25000
+
+        # glue_pen disabled (we now control glue via glue_ok probability)
+        glue_pen = 0
+
+        return reg_pen + span_pen + move_pen + repeat_pen + shared_pen + raw_pen + cross_pen + glue_pen
 
     cands.sort(key=cost)
     return sorted(cands[0])
+
 
 
 # =========================================================
@@ -1094,20 +1201,41 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     raw = [chord_to_midi(ch, base_oct=BASE_OCTAVE) for ch in chords]
 
     if revoice:
-        voiced = []
-        prev_v = None
-        prev_name = chords[0]
-        for ch_name, notes in zip(chords, raw):
-            if prev_v is None:
-                v = choose_best_voicing(None, ch_name, ch_name, notes, random)
-            else:
-                v = choose_best_voicing(prev_v, prev_name, ch_name, notes, random)
-            voiced.append(v)
-            prev_v = v
-            prev_name = ch_name
-        out_notes = voiced
-    else:
-        out_notes = raw
+    voiced = []
+    prev_v = None
+    prev_name = chords[0]
+
+    # Create a local RNG for voicing behavior
+    rng = random.Random()
+
+    for ch_name, notes in zip(chords, raw):
+        if prev_v is None:
+            v = choose_best_voicing(
+                None,
+                ch_name,
+                ch_name,
+                notes,
+                key_name,
+                rng
+            )
+        else:
+            v = choose_best_voicing(
+                prev_v,
+                prev_name,
+                ch_name,
+                notes,
+                key_name,
+                rng
+            )
+
+        voiced.append(v)
+        prev_v = v
+        prev_name = ch_name
+
+    out_notes = voiced
+else:
+    out_notes = raw
+
 
     t = 0.0
     for notes, bars in zip(out_notes, durations):
@@ -1138,7 +1266,7 @@ def write_single_chord_midi(out_root: str, chord_name: str, revoice: bool, lengt
     inst = pretty_midi.Instrument(program=0)
 
     raw = chord_to_midi(chord_name, base_oct=BASE_OCTAVE)
-    notes = choose_best_voicing(None, chord_name, chord_name, raw, random) if revoice else raw
+    notes = choose_best_voicing(None, chord_name, chord_name, raw, "C", rng) if revoice else raw
 
     for p in sorted(set(notes)):
         inst.notes.append(pretty_midi.Note(
