@@ -255,21 +255,6 @@ div[data-baseweb="toggle"] input:checked + div{
   word-break: keep-all !important;
   overflow-wrap: normal !important;
 }
-/* Reset button: keep centered + never truncate text */
-.aa-reset-wrap [data-testid="stButton"] > button{
-  width: fit-content !important;
-  min-width: 240px !important;
-  margin: 0 auto !important;
-  padding-left: 2.2em !important;
-  padding-right: 2.2em !important;
-}
-
-/* Prevent Streamlit/BaseWeb from ellipsizing the label */
-.aa-reset-wrap [data-testid="stButton"] > button *{
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: nowrap !important;
-}
 
 .stButton>button:hover {
   transform: translateY(-1px);
@@ -1414,11 +1399,11 @@ with sp_center:
         with st.expander("ADVANCED SETTINGS", expanded=False):
             st.caption("Chord type balance: 0 disables. 50 is default. 100 strongly favors.")
 
-            col_center = st.columns([1, 2, 1])[1]
-            with col_center:
-                if st.button("Reset to Default", use_container_width=True, key="aa_reset_defaults"):
-                    reset_adv_defaults()
-                    st.rerun()
+            st.markdown('<div class="aa-reset-wrap">', unsafe_allow_html=True)
+            if st.button("Reset to Default", use_container_width=False, key="aa_reset_defaults"):
+                reset_adv_defaults()
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("### MAJOR FAMILY")
             c1, c2 = st.columns(2)
