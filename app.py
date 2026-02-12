@@ -346,6 +346,20 @@ div[data-testid="stMarkdownContainer"] > p:empty {
   opacity: 0.95;
   letter-spacing: 0.8px !important;
 }
+/* FIX: slider value numbers splitting vertically (e.g. 50 -> 5 on top of 0) */
+[data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"],
+[data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"] *{
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  letter-spacing: 0px !important;
+}
+
+[data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"]{
+  min-width: 2.6em !important;      /* enough for 100 */
+  text-align: center !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -1393,7 +1407,7 @@ with sp_center:
         _ensure_adv_defaults()
 
         with st.expander("", expanded=False):
-        st.markdown("#### ADVANCED SETTINGS")
+            st.markdown("#### ADVANCED SETTINGS")
 
             top_l, top_r = st.columns([2, 1])
             with top_l:
