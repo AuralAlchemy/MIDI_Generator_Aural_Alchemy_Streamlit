@@ -81,25 +81,6 @@ button, .stButton>button,
   font-family: "Cinzel", serif !important;
   letter-spacing: 0.55px !important;
 }
-/* --- Reset button: perfectly centered and never truncated --- */
-div[data-testid="column"] div[data-testid="stButton"] {
-  display: flex !important;
-  justify-content: center !important;
-}
-
-div[data-testid="column"] div[data-testid="stButton"] > button {
-  width: fit-content !important;
-  min-width: 260px !important;  /* increase if you want it wider */
-  padding-left: 2.2em !important;
-  padding-right: 2.2em !important;
-}
-
-div[data-testid="column"] div[data-testid="stButton"] > button,
-div[data-testid="column"] div[data-testid="stButton"] > button * {
-  white-space: nowrap !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-}
 
 /* ✅ Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
 [data-baseweb="icon"], 
@@ -298,6 +279,27 @@ div[data-baseweb="toggle"] input:checked + div{
   animation: shimmer 1.2s ease;
 }
 @keyframes shimmer { 100% { left: 140%; } }
+
+/* --- Reset button: perfectly centered and never truncated --- */
+div[data-testid="column"] div[data-testid="stButton"] {
+  display: flex !important;
+  justify-content: center !important;
+}
+
+div[data-testid="column"] div[data-testid="stButton"] > button {
+  width: fit-content !important;
+  min-width: 260px !important;  /* increase if you want it wider */
+  padding-left: 2.2em !important;
+  padding-right: 2.2em !important;
+}
+
+div[data-testid="column"] div[data-testid="stButton"] > button,
+div[data-testid="column"] div[data-testid="stButton"] > button * {
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
 
 /* Target ONLY the Reset button by its key */
 button[kind="secondary"][data-testid="baseButton-secondary"]:has(span:contains("Reset to Default")) {
