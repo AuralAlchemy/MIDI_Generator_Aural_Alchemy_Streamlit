@@ -1255,7 +1255,10 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     out_dir = os.path.join(out_root, "Progressions", BAR_DIR[total_bars])
     os.makedirs(out_dir, exist_ok=True)
 
-    filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}_{chord_list_token(chords)}.mid"
+    rv_tag = "_Revoice" if revoice else ""
+
+    filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}_{chord_list_token(chords)}{rv_tag}.mid"
+
     midi.write(os.path.join(out_dir, filename))
 
 
@@ -1292,7 +1295,9 @@ def write_single_chord_midi(out_root: str, chord_name: str, revoice: bool, lengt
 
     chords_dir = os.path.join(out_root, "Chords")
     os.makedirs(chords_dir, exist_ok=True)
-    midi.write(os.path.join(chords_dir, f"{safe_token(chord_name)}.mid"))
+    rv_tag = "_Revoice" if revoice else ""
+    midi.write(os.path.join(chords_dir, f"{safe_token(chord_name)}{rv_tag}.mid"))
+
 
 
 def zip_pack(out_root: str, zip_path: str):
@@ -1319,7 +1324,13 @@ def build_pack(progressions, revoice: bool) -> tuple[str, int]:
     for ch in sorted(unique_chords):
         write_single_chord_midi(prog_root, ch, revoice=revoice, length_bars=4)
 
-    zip_path = os.path.join(workdir, DOWNLOAD_NAME)
+    zip_name = DOWNLOAD_NAME.replace(".zip", "")
+    if revoice:
+        zip_name += "_Revoice"
+    zip_name += ".zip"
+
+    zip_path = os.path.join(workdir, zip_name)
+
     zip_pack(prog_root, zip_path)
 
     return zip_path, len(unique_chords)
