@@ -359,6 +359,25 @@ div[data-testid="stMarkdownContainer"] > p:empty {
   min-width: 2.6em !important;      /* enough for 100 */
   text-align: center !important;
 }
+/* FIX: prevent button text from stacking vertically */
+.stButton>button{
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+}
+/* FIX: slider tooltip numbers wrapping (50 -> 5 on top of 0) */
+[data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"],
+[data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"] *{
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  letter-spacing: 0px !important;
+}
+[data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"]{
+  min-width: 2.6em !important;
+  text-align: center !important;
+}
+
 
 </style>
 """,
@@ -1365,6 +1384,37 @@ def _reset_adv_defaults():
     for q in ADV_ALL_QUALITIES:
         st.session_state[f"adv_{q}"] = ADV_DEFAULT_VALUE
 
+# =========================================================
+# ADVANCED SETTINGS (Chord type weights)
+# =========================================================
+ENABLE_CHORD_TYPE_SLIDERS = True   # set to False to disable this feature completely (not in UI)
+ADV_DEFAULT_VALUE = 50
+
+ADV_QUALITIES = [
+    # Major family
+    ("maj9", "MAJ9"),
+    ("maj7", "MAJ7"),
+    ("add9", "ADD9"),
+    ("6add9", "6ADD9"),
+    ("6", "6"),
+    ("maj", "MAJ"),
+    # Minor family
+    ("min9", "MIN9"),
+    ("min7", "MIN7"),
+    ("min11", "MIN11"),
+    ("min", "MIN"),
+    # Sus family (keep if you want sliders for them too)
+    ("sus2add9", "SUS2ADD9"),
+    ("sus4add9", "SUS4ADD9"),
+    ("sus2", "SUS2"),
+    ("sus4", "SUS4"),
+]
+
+def ensure_adv_defaults():
+    for qual, _label in ADV_QUALITIES:
+        st.session_state.setdefault(f"adv_{qual}", ADV_DEFAULT_VALUE)
+
+
 
 # =========================================================
 # HERO
@@ -1401,37 +1451,47 @@ with sp_center:
         value=False,
         help="Repositions the notes within each chord for smoother movement and a more original sound."
     )
+    if ENABLE_CHORD_TYPE_SLIDERS:
+    ensure_adv_defaults()
 
-    # Advanced settings (Chord Type Balance)
-    if ENABLE_CHORD_BALANCE_FEATURE:
-        _ensure_adv_defaults()
 
-        with st.expander("", expanded=False):
-            st.markdown("#### ADVANCED SETTINGS")
+    # =========================================================
+# ADVANCED SETTINGS UI
+# =========================================================
+if ENABLE_CHORD_TYPE_SLIDERS:
+    ensure_adv_defaults()
 
-            top_l, top_r = st.columns([2, 1])
-            with top_l:
-                st.caption("Chord Type Balance. 0 disables. 50 is default. 100 strongly favors.")
-            with top_r:
-                if st.button("Reset to Default", use_container_width=True):
-                    _reset_adv_defaults()
-                    st.rerun()
+    with st.expander("ADVANCED SETTINGS", expanded=False):
+        st.caption("Chord type balance: 0 disables. 50 is default. 100 strongly favors.")
 
-            st.markdown('<div class="aa-adv-section">MAJOR FAMILY</div>', unsafe_allow_html=True)
-            for row in [("maj9", "MAJ9"), ("maj7", "MAJ7"), ("add9", "ADD9"), ("6add9", "6ADD9"), ("6", "6"), ("maj", "MAJ")]:
-                q, label = row
-                c1, c2 = st.columns([1, 3])
-                with c1:
-                    st.markdown(f'<div class="aa-adv-label">{label}</div>', unsafe_allow_html=True)
-                with c2:
-                    st.slider(
-                        label="",
-                        min_value=0,
-                        max_value=100,
-                        value=int(st.session_state.get(f"adv_{q}", ADV_DEFAULT_VALUE)),
-                        key=f"adv_{q}",
-                        label_visibility="collapsed",
-                    )
+        r1, r2 = st.columns([2, 3])
+        with r2:
+            if st.button("Reset to Default", use_container_width=True):
+                for qual, _ in ADV_QUALITIES:
+                    st.session_state[f"adv_{qual}"] = ADV_DEFAULT_VALUE
+                st.rerun()
+
+        st.markdown("### MAJOR FAMILY")
+        c1, c2 = st.columns(2)
+        for (qual, label) in [x for x in ADV_QUALITIES if x[0] in ("maj9","maj7","add9","6add9","6","maj")]:
+            col = c1 if (("maj9","add9","6") .__contains__(qual)) else c2
+            with col:
+                st.slider(label, 0, 100, key=f"adv_{qual}")
+
+        st.markdown("### MINOR FAMILY")
+        c1, c2 = st.columns(2)
+        for (qual, label) in [x for x in ADV_QUALITIES if x[0] in ("min9","min7","min11","min")]:
+            col = c1 if qual in ("min9","min11") else c2
+            with col:
+                st.slider(label, 0, 100, key=f"adv_{qual}")
+
+        st.markdown("### SUS FAMILY")
+        c1, c2 = st.columns(2)
+        for (qual, label) in [x for x in ADV_QUALITIES if x[0] in ("sus2add9","sus4add9","sus2","sus4")]:
+            col = c1 if qual in ("sus2add9","sus2") else c2
+            with col:
+                st.slider(label, 0, 100, key=f"adv_{qual}")
+
 
             st.markdown('<div class="aa-adv-section">MINOR FAMILY</div>', unsafe_allow_html=True)
             for row in [("min9", "MIN9"), ("min7", "MIN7"), ("min11", "MIN11"), ("min", "MIN")]:
