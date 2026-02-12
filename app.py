@@ -1,25 +1,36 @@
-# app.py — Aural Alchemy | Endless Ambient MIDI Progressions
+# app.py  Aural Alchemy | Endless Ambient MIDI Progressions
 # Streamlit app (standalone) that:
-# - Generates diatonic, loop-safe ambient chord progressions (NO out-of-scale, NO low-sim transitions)
+# - Generates diatonic, loop-safe ambient chord progressions
 # - Exports a ZIP containing: Progressions (4/8/16-bar folders) + Individual Chords library
 # - Optional Re-Voicing (inversions/voicing engine)
 # - Premium UI styling (Cinzel font everywhere, cyan slider, gold shimmer button, soft glows)
-# - Sacred geometry mandala overlay (two layers)
+# - Sacred geometry mandala overlay (two layers + slow rotation)
+# - ADVANCED: Chord Type Balance sliders (optional, can be disabled via flag)
+# - ADVANCED: Reset sliders to default (50)
+# - ZIP name: adds "_Revoiced" when re-voicing is enabled
 
 import os
 import re
 import math
 import random
+import shutil
 import tempfile
 import base64
 from zipfile import ZipFile
 from collections import Counter
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import pretty_midi
+
+
+# =========================================================
+# FEATURE FLAGS (DEV ONLY)
+# =========================================================
+# Set to False to disable the chord-balance feature completely (no UI, no weighting logic).
+ENABLE_CHORD_BALANCE_FEATURE = True
 
 
 # =========================================================
@@ -37,15 +48,10 @@ APP_TITLE_LINE2 = "MIDI GENERATOR"
 APP_SUBTITLE = "Endless Ambient MIDI Progressions"
 DOWNLOAD_NAME = "MIDI_Progressions_Aural_Alchemy.zip"
 
-# =========================================================
-# INTERNAL SWITCH (NOT IN UI)
-# - Set False to completely disable the Advanced Sliders feature
-# =========================================================
-ENABLE_ADVANCED_SLIDERS = True
-
 
 # =========================================================
 # PREMIUM CSS (Cinzel everywhere + cyan slider + shimmer + glows)
+# + Fix expander header glitching and slider label/value duplication visuals
 # =========================================================
 st.markdown(
     r"""
@@ -110,11 +116,13 @@ button, .stButton>button,
   backface-visibility: hidden;
   contain: paint;
 }
+/* Layer 1: crisp lines, slow spin */
 .aa-geom-1{
-  opacity: 0.18;
-  filter: drop-shadow(0 0 26px rgba(0,229,255,0.10));
+  opacity: 0.20;
+  filter: drop-shadow(0 0 28px rgba(0,229,255,0.10));
   animation: aaSpin1 240s linear infinite;
 }
+/* Layer 2: softer glow, reverse spin + subtle breathing */
 .aa-geom-2{
   opacity: 0.18;
   filter: blur(0.9px) drop-shadow(0 0 36px rgba(255,215,0,0.10));
@@ -156,6 +164,7 @@ button, .stButton>button,
   padding: 0;
   white-space: normal;
   word-break: keep-all;
+
   background: linear-gradient(
     90deg,
     rgba(255,255,255,0.98),
@@ -170,8 +179,6 @@ button, .stButton>button,
 .aa-title-second{
   display:block;
   margin-top: 6px;
-  font-size: 38px;
-  letter-spacing: 2.5px;
   background: linear-gradient(
     90deg,
     rgba(255,255,255,0.98),
@@ -181,6 +188,8 @@ button, .stButton>button,
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  font-size: 38px;
+  letter-spacing: 2.5px;
 }
 .aa-subtitle {
   margin-top: 18px;
@@ -253,7 +262,9 @@ div[data-baseweb="toggle"] input:checked + div{
     rgba(255,255,255,0) 100%);
   transform: skewX(-25deg);
 }
-.stButton>button:hover::after { animation: shimmer 1.2s ease; }
+.stButton>button:hover::after {
+  animation: shimmer 1.2s ease;
+}
 @keyframes shimmer { 100% { left: 140%; } }
 
 /* Metric cards glow */
@@ -277,7 +288,7 @@ div[data-baseweb="toggle"] input:checked + div{
 }
 
 /* Reduce top whitespace */
-.block-container { padding-top: 1.0rem !important; }
+.block-container { padding-top: 3.5rem !important; }
 
 /* Ready badge */
 .aa-ready-wrap{
@@ -313,37 +324,27 @@ div[data-testid="stMarkdownContainer"] > p:empty {
   display: none !important;
 }
 
-/* NUCLEAR: KILL STREAMLIT RED/ORANGE PRIMARY */
-[data-testid="stSlider"] * {
-  --primary-color: #00E5FF !important;
-  --primaryColor: #00E5FF !important;
-}
-
-/* Add breathing room below Streamlit top bar */
-.block-container {
-  padding-top: 3.5rem !important;
-}
-
-/* ===== Advanced Settings UI FIXES (stop overlap / weird wrapping) ===== */
-[data-testid="stExpander"] summary {
-  letter-spacing: 0.2px !important;
-  font-size: 14px !important;
-}
-[data-testid="stWidgetLabel"],
-[data-testid="stWidgetLabel"] p,
-label {
-  letter-spacing: 0.2px !important;
+/* Fix expander header "overposting" glitch by removing aggressive tracking there */
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] summary *{
+  letter-spacing: 0px !important;
+  text-transform: none !important;
   line-height: 1.25 !important;
 }
-[data-testid="stSlider"] [data-baseweb="slider"] * {
-  font-size: 12px !important;
-  letter-spacing: 0.15px !important;
+
+/* Slightly tighten slider label rows (we build our own labels) */
+.aa-adv-label{
+  font-size: 13px;
+  opacity: 0.90;
+  letter-spacing: 0.4px !important;
+  padding-top: 8px;
 }
-[data-testid="stExpander"] .stCaption,
-[data-testid="stExpander"] [data-testid="stMarkdownContainer"] p {
-  max-width: 100% !important;
-  white-space: normal !important;
-  overflow-wrap: break-word !important;
+.aa-adv-section{
+  margin-top: 8px;
+  margin-bottom: 2px;
+  font-weight: 700;
+  opacity: 0.95;
+  letter-spacing: 0.8px !important;
 }
 </style>
 """,
@@ -353,6 +354,7 @@ label {
 
 # =========================================================
 # Geometry SVG overlay (BASE64 DATA URI)
+# IMPORTANT: only ONE triangle (one polygon) as requested
 # =========================================================
 GEOM_SVG = """
 <svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
@@ -370,7 +372,9 @@ GEOM_SVG = """
     <circle cx="600" cy="600" r="260" opacity="0.50"/>
     <circle cx="600" cy="600" r="190" opacity="0.44"/>
     <circle cx="600" cy="600" r="120" opacity="0.36"/>
+
     <polygon points="600,220 929.1,790 270.9,790" opacity="0.90"/>
+
     <circle cx="600" cy="600" r="480" opacity="0.28"/>
     <circle cx="600" cy="600" r="520" opacity="0.22"/>
   </g>
@@ -383,6 +387,7 @@ GEOM_SVG = """
   </g>
 </svg>
 """
+
 GEOM_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(GEOM_SVG.encode("utf-8")).decode("utf-8")
 
 st.markdown(
@@ -513,26 +518,17 @@ MAX_BIG_JUMPS_PER_PROG = 1
 SUS_WEIGHT_MULT = 0.50
 SUS_UPGRADE_PROB = 0.50
 
-MAJ_POOL = [("maj9", 10), ("maj7", 9), ("add9", 7), ("6add9", 6), ("6", 4), ("maj", 2)]
-MIN_POOL = [("min9", 10), ("min7", 9), ("min11", 4), ("min", 2)]
-SUS_POOL = [("sus2add9", 10), ("sus4add9", 10), ("sus2", 2), ("sus4", 2)]
+# Base pools (keep as-is)
+MAJ_POOL_BASE = [("maj9", 10), ("maj7", 9), ("add9", 7), ("6add9", 6), ("6", 4), ("maj", 2)]
+MIN_POOL_BASE = [("min9", 10), ("min7", 9), ("min11", 4), ("min", 2)]
+SUS_POOL_BASE = [("sus2add9", 10), ("sus4add9", 10), ("sus2", 2), ("sus4", 2)]
 
 
 def _scaled_pool(pool, mult):
     return [(q, max(1e-9, w * mult)) for q, w in pool]
 
 
-SUS_POOL_SCALED = _scaled_pool(SUS_POOL, SUS_WEIGHT_MULT)
-
-DEG_ALLOWED_BASE = {
-    0: MAJ_POOL + SUS_POOL_SCALED,
-    1: MIN_POOL + MAJ_POOL + SUS_POOL_SCALED,
-    2: MIN_POOL + MAJ_POOL + SUS_POOL_SCALED,
-    3: MAJ_POOL + MIN_POOL + SUS_POOL_SCALED,
-    4: MAJ_POOL + MIN_POOL + SUS_POOL_SCALED,
-    5: MIN_POOL + MAJ_POOL + SUS_POOL_SCALED,
-    6: MIN_POOL + MAJ_POOL + SUS_POOL_SCALED,
-}
+SUS_POOL_SCALED_BASE = _scaled_pool(SUS_POOL_BASE, SUS_WEIGHT_MULT)
 
 SAFE_FALLBACK_ORDER = [
     "maj9","maj7","add9","6add9","6",
@@ -603,82 +599,81 @@ def _pattern_fingerprint(degs, quals):
 
 
 # =========================================================
-# ADVANCED SLIDER SYSTEM (QUALITY WEIGHTS)
+# CHORD TYPE BALANCE (ADVANCED)
+# Sliders are 0..100 with default 50.
+# 50 keeps original behavior.
+# 0 disables that quality by setting its weight to 0.
+# >50 gradually increases its weight.
 # =========================================================
-ADV_DEFAULT = 50
+ADV_QUALITIES_MAJOR = ["maj9", "maj7", "add9", "6add9", "6", "maj"]
+ADV_QUALITIES_MINOR = ["min9", "min7", "min11", "min"]
+ADV_QUALITIES_SUS = ["sus2add9", "sus4add9", "sus2", "sus4"]
 
-ADV_GROUPS = {
-    "Major Family": [
-        ("maj9", "Maj9"),
-        ("maj7", "Maj7"),
-        ("add9", "Add9"),
-        ("6add9", "6add9"),
-        ("6", "6"),
-        ("maj", "Maj"),
-    ],
-    "Minor Family": [
-        ("min9", "Min9"),
-        ("min7", "Min7"),
-        ("min11", "Min11"),
-        ("min", "Min"),
-    ],
-    "Sus Family": [
-        ("sus2add9", "Sus2add9"),
-        ("sus4add9", "Sus4add9"),
-        ("sus2", "Sus2"),
-        ("sus4", "Sus4"),
-    ],
-}
+ADV_ALL_QUALITIES = ADV_QUALITIES_MAJOR + ADV_QUALITIES_MINOR + ADV_QUALITIES_SUS
+ADV_DEFAULT_VALUE = 50
 
 
-def init_adv_state():
-    if not ENABLE_ADVANCED_SLIDERS:
-        return
-    for section in ADV_GROUPS.values():
-        for qual, _ in section:
-            st.session_state.setdefault(f"adv_{qual}", ADV_DEFAULT)
+def _balance_factor(v: int) -> float:
+    # v: 0..100, default 50 -> 1.0
+    # 0 -> 0.0 (disabled)
+    # 100 -> 2.0 (strongly favored but not absolute)
+    v = int(max(0, min(100, v)))
+    if v == 0:
+        return 0.0
+    if v == 50:
+        return 1.0
+    if v < 50:
+        # 1..49 -> 0.02..0.98
+        return max(0.02, v / 50.0)
+    # 51..100 -> 1.02..2.0
+    return 1.0 + ((v - 50) / 50.0) * 1.0
 
 
-def get_adv_weights() -> dict:
-    """
-    Return per-quality multipliers.
-    0 disables. 50 = neutral. 100 strongly favors.
-    (Internally mapped to 0..2 and capped).
-    """
-    if not ENABLE_ADVANCED_SLIDERS:
-        return {}
-    weights = {}
-    for section in ADV_GROUPS.values():
-        for qual, _ in section:
-            v = int(st.session_state.get(f"adv_{qual}", ADV_DEFAULT))
-            mult = (v / 50.0) if v > 0 else 0.0  # 0..100 -> 0..2
-            mult = max(0.0, min(3.0, mult))
-            weights[qual] = mult
-    return weights
-
-
-def apply_quality_weights(pool, weights: dict):
-    """
-    pool: list[(qual, base_weight)]
-    weights: dict[qual] -> multiplier
-    """
-    if not weights:
-        return pool
+def _apply_balance_to_pool(pool: List[Tuple[str, float]], balance: Dict[str, int]) -> List[Tuple[str, float]]:
     out = []
     for q, w in pool:
-        mult = weights.get(q, 1.0)
-        out.append((q, max(1e-9, w * mult)))
+        factor = _balance_factor(balance.get(q, ADV_DEFAULT_VALUE))
+        w2 = w * factor
+        if w2 > 0:
+            out.append((q, w2))
     return out
 
 
-def _pick_quality_diatonic(rng: random.Random, key: str, deg: int, qual_weights: dict) -> str:
+def _build_deg_allowed(balance: Optional[Dict[str, int]]):
+    if not ENABLE_CHORD_BALANCE_FEATURE or not balance:
+        maj_pool = MAJ_POOL_BASE[:]
+        min_pool = MIN_POOL_BASE[:]
+        sus_pool = SUS_POOL_SCALED_BASE[:]
+    else:
+        maj_pool = _apply_balance_to_pool(MAJ_POOL_BASE, balance)
+        min_pool = _apply_balance_to_pool(MIN_POOL_BASE, balance)
+        sus_pool = _apply_balance_to_pool(SUS_POOL_SCALED_BASE, balance)
+
+        # If user disables too much and something becomes empty, fall back to base
+        if not maj_pool:
+            maj_pool = MAJ_POOL_BASE[:]
+        if not min_pool:
+            min_pool = MIN_POOL_BASE[:]
+        if not sus_pool:
+            sus_pool = SUS_POOL_SCALED_BASE[:]
+
+    return {
+        0: maj_pool + sus_pool,
+        1: min_pool + maj_pool + sus_pool,
+        2: min_pool + maj_pool + sus_pool,
+        3: maj_pool + min_pool + sus_pool,
+        4: maj_pool + min_pool + sus_pool,
+        5: min_pool + maj_pool + sus_pool,
+        6: min_pool + maj_pool + sus_pool,
+    }
+
+
+def _pick_quality_diatonic(rng: random.Random, key: str, deg: int, deg_allowed: Dict[int, List[Tuple[str, float]]]) -> str:
     root = SCALES[key][deg]
     triad_boost = (rng.random() < TRIAD_PROB_BASE)
+    pool = deg_allowed[deg]
 
-    pool = DEG_ALLOWED_BASE[deg]
-    pool = apply_quality_weights(pool, qual_weights)
-
-    for _ in range(220):
+    for _ in range(200):
         q = _wchoice(rng, pool)
 
         if q in ("sus2", "sus4") and rng.random() < SUS_UPGRADE_PROB:
@@ -691,7 +686,6 @@ def _pick_quality_diatonic(rng: random.Random, key: str, deg: int, qual_weights:
         if _is_diatonic_chord(key, root, q):
             return q
 
-    # fallback unaffected by weights (safety)
     for q in SAFE_FALLBACK_ORDER:
         if _is_diatonic_chord(key, root, q):
             return q
@@ -758,8 +752,8 @@ def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: 
     return degs, quals
 
 
-def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int, qual_weights: dict):
-    quals = [_pick_quality_diatonic(rng, key, d, qual_weights) for d in degs]
+def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int, deg_allowed):
+    quals = [_pick_quality_diatonic(rng, key, d, deg_allowed=deg_allowed) for d in degs]
 
     ded = _dedupe_inside_progression(rng, key, degs[:], quals[:])
     if ded is None:
@@ -807,9 +801,11 @@ def _pick_keys_even(n: int, rng: random.Random) -> list:
     return out
 
 
-def generate_progressions(n: int, seed: int, qual_weights: dict):
+def generate_progressions(n: int, seed: int, chord_balance: Optional[Dict[str, int]] = None):
     rng = random.Random(seed)
     keys = _pick_keys_even(n, rng)
+
+    deg_allowed = _build_deg_allowed(chord_balance)
 
     max_pattern_dupes = int(math.floor(n * 0.01))
     pattern_dupe_used = 0
@@ -829,7 +825,7 @@ def generate_progressions(n: int, seed: int, qual_weights: dict):
             total_bars, m = _pick_valid_total_and_m(rng)
             degs = _pick_template_degs(rng, m)
 
-            res = _build_progression(rng, key, degs, total_bars, qual_weights)
+            res = _build_progression(rng, key, degs, total_bars, deg_allowed=deg_allowed)
             if res is None:
                 continue
 
@@ -878,7 +874,6 @@ MAX_SPAN = 19
 MAX_SHARED_DEFAULT = 2
 MAX_SHARED_MIN11 = 3
 
-DISALLOW_GLUE = False
 ENFORCE_NOT_RAW_WHEN_VOICING = True
 
 GLUE_LOW_CUTOFF = 48      # C3
@@ -972,9 +967,11 @@ def glue_ok(notes: List[int], rng: random.Random) -> bool:
     pairs = semitone_pairs(notes)
     if not pairs:
         return True
+
     for a, b in pairs:
         if a < GLUE_LOW_CUTOFF or b < GLUE_LOW_CUTOFF:
             return False
+
     return rng.random() < GLUE_PROBABILITY
 
 
@@ -1034,10 +1031,15 @@ def allowed_resolution_pcs(key: str) -> set:
     pcs = set()
     tonic = NOTE_TO_PC[SCALES[key][0]]
     pcs.add(tonic)
+
     if ALLOW_RESOLVE_TO_THIRD:
-        pcs.add(NOTE_TO_PC[SCALES[key][2]])
+        third = NOTE_TO_PC[SCALES[key][2]]
+        pcs.add(third)
+
     if ALLOW_RESOLVE_TO_FIFTH:
-        pcs.add(NOTE_TO_PC[SCALES[key][4]])
+        fifth = NOTE_TO_PC[SCALES[key][4]]
+        pcs.add(fifth)
+
     return pcs
 
 
@@ -1054,10 +1056,12 @@ def bad_cross_semitone_indices(prev_notes: List[int], cur_notes: List[int], allo
 
 def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set, max_iters: int = 8) -> List[int]:
     v = sorted(list(cur_notes))
+
     for _ in range(max_iters):
         bad_idxs = bad_cross_semitone_indices(prev_notes, v, allowed_target_pcs)
         if not bad_idxs:
             break
+
         changed_any = False
         for idx in bad_idxs:
             n = v[idx]
@@ -1068,17 +1072,22 @@ def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_
                     continue
                 if n2 in v:
                     continue
+
                 test = v[:]
                 test[idx] = n2
                 test = sorted(test)
+
                 remaining = len(bad_cross_semitone_indices(prev_notes, test, allowed_target_pcs))
                 options.append((remaining, abs(center(test) - TARGET_CENTER), test))
+
             if options:
                 options.sort(key=lambda x: (x[0], x[1]))
                 v = options[0][2]
                 changed_any = True
+
         if not changed_any:
             break
+
     return v
 
 
@@ -1114,27 +1123,34 @@ def choose_best_voicing(
 
     def cost(v):
         v = sorted(v)
+
         reg_pen = abs(center(v) - TARGET_CENTER) * 120
+
         sp = span(v)
         span_pen = abs(sp - IDEAL_SPAN) * 80
         if sp < MIN_SPAN:
             span_pen += (MIN_SPAN - sp) * 700
         if sp > MAX_SPAN:
             span_pen += (sp - MAX_SPAN) * 220
+
         move_pen = 0 if prev_voicing is None else total_move(prev_voicing, v) * 7
         repeat_pen = 2500 if (prev_voicing is not None and sorted(prev_voicing) == v) else 0
+
         shared_pen = 0
         if prev_voicing is not None:
             limit = max_shared_allowed(prev_name, cur_name)
             sh = shared_pitch_count(prev_voicing, v)
             if sh > limit:
                 shared_pen = (sh - limit) * 6000
+
         raw_pen = 100000 if (ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped)) else 0
+
         cross_pen = 0
         if prev_voicing is not None:
             allowed_pcs = allowed_resolution_pcs(key_name)
             bad_left = len(bad_cross_semitone_indices(prev_voicing, v, allowed_pcs))
             cross_pen = bad_left * 25000
+
         return reg_pen + span_pen + move_pen + repeat_pen + shared_pen + raw_pen + cross_pen
 
     cands.sort(key=cost)
@@ -1195,14 +1211,17 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
         prev_v = None
         prev_name = chords[0]
         rng = random.Random()
+
         for ch_name, notes in zip(chords, raw):
             if prev_v is None:
                 v = choose_best_voicing(None, ch_name, ch_name, notes, key_name, rng)
             else:
                 v = choose_best_voicing(prev_v, prev_name, ch_name, notes, key_name, rng)
+
             voiced.append(v)
             prev_v = v
             prev_name = ch_name
+
         out_notes = voiced
     else:
         out_notes = raw
@@ -1225,7 +1244,8 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     out_dir = os.path.join(out_root, "Progressions", BAR_DIR[total_bars])
     os.makedirs(out_dir, exist_ok=True)
 
-    filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}_{chord_list_token(chords)}.mid"
+    rv_tag = "_Revoice" if revoice else ""
+    filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}_{chord_list_token(chords)}{rv_tag}.mid"
     midi.write(os.path.join(out_dir, filename))
 
 
@@ -1254,7 +1274,8 @@ def write_single_chord_midi(out_root: str, chord_name: str, revoice: bool, lengt
 
     chords_dir = os.path.join(out_root, "Chords")
     os.makedirs(chords_dir, exist_ok=True)
-    midi.write(os.path.join(chords_dir, f"{safe_token(chord_name)}.mid"))
+    rv_tag = "_Revoice" if revoice else ""
+    midi.write(os.path.join(chords_dir, f"{safe_token(chord_name)}{rv_tag}.mid"))
 
 
 def zip_pack(out_root: str, zip_path: str):
@@ -1266,7 +1287,7 @@ def zip_pack(out_root: str, zip_path: str):
                 z.write(full, arcname=rel)
 
 
-def build_pack(progressions, revoice: bool) -> tuple[str, int]:
+def build_pack(progressions, revoice: bool) -> tuple[str, int, str]:
     validate_progressions(progressions)
 
     workdir = tempfile.mkdtemp(prefix="aa_midi_")
@@ -1281,14 +1302,14 @@ def build_pack(progressions, revoice: bool) -> tuple[str, int]:
     for ch in sorted(unique_chords):
         write_single_chord_midi(prog_root, ch, revoice=revoice, length_bars=4)
 
-    zip_name = DOWNLOAD_NAME
-    if revoice and zip_name.lower().endswith(".zip"):
-        zip_name = zip_name[:-4] + "_revoiced.zip"
+    # ZIP filename: add "_Revoiced" at the end when re-voicing enabled
+    base = DOWNLOAD_NAME[:-4] if DOWNLOAD_NAME.lower().endswith(".zip") else DOWNLOAD_NAME
+    final_zip_name = f"{base}_Revoiced.zip" if revoice else DOWNLOAD_NAME
 
-    zip_path = os.path.join(workdir, zip_name)
+    zip_path = os.path.join(workdir, final_zip_name)
     zip_pack(prog_root, zip_path)
 
-    return zip_path, len(unique_chords)
+    return zip_path, len(unique_chords), final_zip_name
 
 
 # =========================================================
@@ -1304,6 +1325,31 @@ def make_rows(progressions):
             "Chords": " – ".join(chords),
         })
     return rows
+
+
+def _ensure_adv_defaults():
+    if not ENABLE_CHORD_BALANCE_FEATURE:
+        return
+    for q in ADV_ALL_QUALITIES:
+        k = f"adv_{q}"
+        if k not in st.session_state:
+            st.session_state[k] = ADV_DEFAULT_VALUE
+
+
+def _read_adv_balance() -> Dict[str, int]:
+    if not ENABLE_CHORD_BALANCE_FEATURE:
+        return {}
+    out = {}
+    for q in ADV_ALL_QUALITIES:
+        out[q] = int(st.session_state.get(f"adv_{q}", ADV_DEFAULT_VALUE))
+    return out
+
+
+def _reset_adv_defaults():
+    if not ENABLE_CHORD_BALANCE_FEATURE:
+        return
+    for q in ADV_ALL_QUALITIES:
+        st.session_state[f"adv_{q}"] = ADV_DEFAULT_VALUE
 
 
 # =========================================================
@@ -1322,11 +1368,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 # =========================================================
 # MAIN PANEL
 # =========================================================
-init_adv_state()
-
 sp_left, sp_center, sp_right = st.columns([1, 2, 1])
 with sp_center:
     n_progressions = st.slider(
@@ -1336,30 +1381,74 @@ with sp_center:
         value=10,
         help="Generates a balanced mix of 4, 8, and 16-bar chord loops in different keys."
     )
+
     revoice = st.toggle(
         "Re-Voicing",
         value=False,
         help="Repositions the notes within each chord for smoother movement and a more original sound."
     )
 
-    if ENABLE_ADVANCED_SLIDERS:
+    # Advanced settings (Chord Type Balance)
+    if ENABLE_CHORD_BALANCE_FEATURE:
+        _ensure_adv_defaults()
+
         with st.expander("Advanced Settings", expanded=False):
-            top_left, top_right = st.columns([1, 1])
-            with top_left:
-                st.caption("Chord type balance. 0 disables. 50 = default. 100 strongly favors.")
-            with top_right:
+            top_l, top_r = st.columns([2, 1])
+            with top_l:
+                st.caption("Chord Type Balance. 0 disables. 50 is default. 100 strongly favors.")
+            with top_r:
                 if st.button("Reset to Default", use_container_width=True):
-                    for sec in ADV_GROUPS.values():
-                        for qual, _ in sec:
-                            st.session_state[f"adv_{qual}"] = 50
+                    _reset_adv_defaults()
                     st.rerun()
 
-            for section, items in ADV_GROUPS.items():
-                st.markdown(f"**{section}**")
-                cols = st.columns(2)
-                for i, (qual, label) in enumerate(items):
-                    with cols[i % 2]:
-                        st.slider(label, 0, 100, key=f"adv_{qual}")
+            st.markdown('<div class="aa-adv-section">MAJOR FAMILY</div>', unsafe_allow_html=True)
+            for row in [("maj9", "MAJ9"), ("maj7", "MAJ7"), ("add9", "ADD9"), ("6add9", "6ADD9"), ("6", "6"), ("maj", "MAJ")]:
+                q, label = row
+                c1, c2 = st.columns([1, 3])
+                with c1:
+                    st.markdown(f'<div class="aa-adv-label">{label}</div>', unsafe_allow_html=True)
+                with c2:
+                    st.slider(
+                        label="",
+                        min_value=0,
+                        max_value=100,
+                        value=int(st.session_state.get(f"adv_{q}", ADV_DEFAULT_VALUE)),
+                        key=f"adv_{q}",
+                        label_visibility="collapsed",
+                    )
+
+            st.markdown('<div class="aa-adv-section">MINOR FAMILY</div>', unsafe_allow_html=True)
+            for row in [("min9", "MIN9"), ("min7", "MIN7"), ("min11", "MIN11"), ("min", "MIN")]:
+                q, label = row
+                c1, c2 = st.columns([1, 3])
+                with c1:
+                    st.markdown(f'<div class="aa-adv-label">{label}</div>', unsafe_allow_html=True)
+                with c2:
+                    st.slider(
+                        label="",
+                        min_value=0,
+                        max_value=100,
+                        value=int(st.session_state.get(f"adv_{q}", ADV_DEFAULT_VALUE)),
+                        key=f"adv_{q}",
+                        label_visibility="collapsed",
+                    )
+
+            st.markdown('<div class="aa-adv-section">SUS FAMILY</div>', unsafe_allow_html=True)
+            for row in [("sus2add9", "SUS2ADD9"), ("sus4add9", "SUS4ADD9"), ("sus2", "SUS2"), ("sus4", "SUS4")]:
+                q, label = row
+                c1, c2 = st.columns([1, 3])
+                with c1:
+                    st.markdown(f'<div class="aa-adv-label">{label}</div>', unsafe_allow_html=True)
+                with c2:
+                    st.slider(
+                        label="",
+                        min_value=0,
+                        max_value=100,
+                        value=int(st.session_state.get(f"adv_{q}", ADV_DEFAULT_VALUE)),
+                        key=f"adv_{q}",
+                        label_visibility="collapsed",
+                    )
+
 
 btn_left, btn_center, btn_right = st.columns([1, 2, 1])
 with btn_center:
@@ -1373,23 +1462,25 @@ if generate_clicked:
     try:
         with st.spinner("Generating progressions…"):
             seed = int(np.random.randint(1, 2_000_000_000))
-            qual_weights = get_adv_weights()
+
+            chord_balance = _read_adv_balance() if ENABLE_CHORD_BALANCE_FEATURE else None
 
             progressions, pattern_dupe_used, pattern_dupe_max, low_sim_total, qual_usage = generate_progressions(
                 n=int(n_progressions),
                 seed=seed,
-                qual_weights=qual_weights
+                chord_balance=chord_balance
             )
 
             if low_sim_total != 0:
                 raise RuntimeError("Safety check failed: low-sim transitions detected.")
 
-            zip_path, chord_count = build_pack(progressions, revoice=bool(revoice))
+            zip_path, chord_count, final_zip_name = build_pack(progressions, revoice=bool(revoice))
 
             st.session_state.progressions = progressions
             st.session_state.zip_path = zip_path
             st.session_state.progression_count = len(progressions)
             st.session_state.chord_count = chord_count
+            st.session_state.final_zip_name = final_zip_name
 
         st.markdown(
             """
@@ -1412,7 +1503,6 @@ if generate_clicked:
 # SUMMARY + DOWNLOAD + TABLE
 # =========================================================
 if "progressions" in st.session_state and st.session_state.get("zip_path"):
-
     a, b = st.columns(2)
     a.metric("Progressions Generated", int(st.session_state.get("progression_count", 0)))
     b.metric("Individual Chords Generated", int(st.session_state.get("chord_count", 0)))
@@ -1426,7 +1516,7 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
             st.download_button(
                 label="Download MIDI Progressions",
                 data=zip_bytes,
-                file_name=os.path.basename(st.session_state.zip_path),
+                file_name=st.session_state.get("final_zip_name", DOWNLOAD_NAME),
                 mime="application/zip",
                 use_container_width=True
             )
@@ -1438,6 +1528,7 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
 
     st.markdown("### Progressions List")
     st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 
 
