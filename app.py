@@ -1392,7 +1392,9 @@ with sp_center:
     if ENABLE_CHORD_BALANCE_FEATURE:
         _ensure_adv_defaults()
 
-        with st.expander("Advanced Settings", expanded=False):
+        with st.expander("", expanded=False):
+        st.markdown("#### ADVANCED SETTINGS")
+
             top_l, top_r = st.columns([2, 1])
             with top_l:
                 st.caption("Chord Type Balance. 0 disables. 50 is default. 100 strongly favors.")
