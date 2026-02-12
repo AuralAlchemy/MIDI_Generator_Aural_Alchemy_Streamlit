@@ -753,6 +753,25 @@ def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: 
 def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int, deg_allowed):
     quals = [_pick_quality_diatonic(rng, key, d, deg_allowed=deg_allowed) for d in degs]
 
+    # =========================================================
+    # RULE: Do not allow progression to start with SUS chord
+    # unless SUS sliders are strongly boosted (>80)
+    # =========================================================
+
+    def is_sus(q: str) -> bool:
+        return q.startswith("sus")
+
+    sus_allowed_start = False
+
+    if chord_balance:
+        sus_keys = ["sus2", "sus4", "sus2add9", "sus4add9"]
+        if any(chord_balance.get(k, ADV_DEFAULT_VALUE) > 80 for k in sus_keys):
+            sus_allowed_start = True
+
+    if is_sus(quals[0]) and not sus_allowed_start:
+        return None
+
+
     ded = _dedupe_inside_progression(rng, key, degs[:], quals[:])
     if ded is None:
         return None
@@ -1602,13 +1621,6 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
 
     st.markdown("### Progressions List")
     st.dataframe(df, use_container_width=True, hide_index=True)
-
-
-
-
-
-
-  
 
 
 
