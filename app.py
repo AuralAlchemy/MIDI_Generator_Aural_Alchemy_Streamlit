@@ -255,6 +255,22 @@ div[data-baseweb="toggle"] input:checked + div{
   word-break: keep-all !important;
   overflow-wrap: normal !important;
 }
+/* Reset button: keep centered + never truncate text */
+.aa-reset-wrap [data-testid="stButton"] > button{
+  width: fit-content !important;
+  min-width: 240px !important;
+  margin: 0 auto !important;
+  padding-left: 2.2em !important;
+  padding-right: 2.2em !important;
+}
+
+/* Prevent Streamlit/BaseWeb from ellipsizing the label */
+.aa-reset-wrap [data-testid="stButton"] > button *{
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
 .stButton>button:hover {
   transform: translateY(-1px);
   box-shadow: 0 0 38px rgba(255,215,0,0.28), 0 18px 55px rgba(0,0,0,0.45) !important;
