@@ -1201,9 +1201,9 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     raw = [chord_to_midi(ch, base_oct=BASE_OCTAVE) for ch in chords]
 
     if revoice:
-    voiced = []
-    prev_v = None
-    prev_name = chords[0]
+        voiced = []
+        prev_v = None
+        prev_name = chords[0]
 
     # Create a local RNG for voicing behavior
     rng = random.Random()
