@@ -1311,7 +1311,7 @@ def validate_progressions(progressions):
             chord_to_midi(ch, base_oct=BASE_OCTAVE)
 
 
-def write_progression_midi(out_root: str, idx: int, chords, durations, key_name: str, revoice: bool):
+def write_progression_midi(out_root: str, idx: int, chords, durations, key_name: str, revoice: bool, seed: int):
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
@@ -1322,7 +1322,7 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
         voiced = []
         prev_v = None
         prev_name = chords[0]
-        rng = random.Random()
+        rng = random.Random(seed + idx)
 
         for ch_name, notes in zip(chords, raw):
             if prev_v is None:
@@ -1399,7 +1399,7 @@ def zip_pack(out_root: str, zip_path: str):
                 z.write(full, arcname=rel)
 
 
-def build_pack(progressions, revoice: bool) -> tuple[str, int, str]:
+def build_pack(progressions, revoice: bool, seed: int) -> tuple[str, int, str]:
     validate_progressions(progressions)
 
     workdir = tempfile.mkdtemp(prefix="aa_midi_")
@@ -1408,7 +1408,7 @@ def build_pack(progressions, revoice: bool) -> tuple[str, int, str]:
 
     unique_chords = set()
     for i, (chords, durations, key_name) in enumerate(progressions, start=1):
-        write_progression_midi(prog_root, i, chords, durations, key_name, revoice=revoice)
+        write_progression_midi(prog_root, i, chords, durations, key_name, revoice=revoice, seed=seed)
         unique_chords.update(chords)
 
     for ch in sorted(unique_chords):
@@ -1503,6 +1503,10 @@ with sp_center:
         value=10,
         help="Generates a balanced mix of 4, 8, and 16-bar chord loops in different keys.",
     )
+    seed_input = st.text_input(
+        "Seed (optional)",
+        value="",
+        help="Enter a number to regenerate the exact same result."
 
     revoice = st.toggle(
         "Re-Voicing",
@@ -1553,7 +1557,10 @@ with sp_center:
 if generate_clicked:
     try:
         with st.spinner("Generating progressions…"):
-            seed = int(np.random.randint(1, 2_000_000_000))
+            if seed_input.strip().isdigit():
+                seed = int(seed_input)
+            else:
+                seed = int(np.random.randint(1, 2_000_000_000))
 
             chord_balance = read_adv_balance() if ENABLE_CHORD_BALANCE_FEATURE else None
 
@@ -1566,7 +1573,7 @@ if generate_clicked:
             if low_sim_total != 0:
                 raise RuntimeError("Safety check failed: low-sim transitions detected.")
 
-            zip_path, chord_count, final_zip_name = build_pack(progressions, revoice=bool(revoice))
+            zip_path, chord_count, final_zip_name = build_pack(progressions, revoice=bool(revoice), seed=seed)
 
             st.session_state["progressions"] = progressions
             st.session_state["zip_path"] = zip_path
