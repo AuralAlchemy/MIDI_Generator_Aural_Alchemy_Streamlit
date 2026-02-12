@@ -247,6 +247,10 @@ div[data-baseweb="toggle"] input:checked + div{
   transition: transform .25s ease, box-shadow .25s ease, filter .25s ease !important;
   position: relative !important;
   overflow: hidden !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
   white-space: nowrap !important;
   word-break: keep-all !important;
   overflow-wrap: normal !important;
@@ -1394,8 +1398,8 @@ with sp_center:
         with st.expander("ADVANCED SETTINGS", expanded=False):
             st.caption("Chord type balance: 0 disables. 50 is default. 100 strongly favors.")
 
-            _l, _r = st.columns([2, 3])
-            with _r:
+            col_center = st.columns([1, 2, 1])[1]
+            with col_center:
                 if st.button("Reset to Default", use_container_width=True, key="aa_reset_defaults"):
                     reset_adv_defaults()
                     st.rerun()
