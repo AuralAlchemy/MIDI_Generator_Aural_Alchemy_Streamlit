@@ -33,8 +33,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-APP_TITLE = "AURAL ALCHEMY MIDI GENERATOR"
-APP_SUBTITLE = "Endless Ambient MIDI Progressions Ready To Drop Into Any DAW"
+APP_TITLE_LINE1 = "AURAL ALCHEMY"
+APP_TITLE_LINE2 = "MIDI GENERATOR"
+APP_SUBTITLE = "Endless Ambient MIDI Progressions"
 DOWNLOAD_NAME = "MIDI_Progressions_Aural_Alchemy.zip"
 
 
@@ -171,6 +172,24 @@ button, .stButton>button,
   color: transparent;
   text-shadow: 0 12px 30px rgba(0,0,0,0.55);
 }
+.aa-title-second{
+  display:block;
+  margin-top: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.98),
+    rgba(0,229,255,0.90),
+    rgba(255,215,0,0.92)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.aa-title-second{
+  font-size: 38px;
+  letter-spacing: 2.5px;
+}
+
 
 }
 .aa-subtitle {
@@ -1158,7 +1177,10 @@ def make_rows(progressions):
 st.markdown(
     f"""
 <div class="aa-hero">
-  <div class="aa-title">{APP_TITLE}</div>
+  <div class="aa-title">
+    {APP_TITLE_LINE1}<br>
+    <span class="aa-title-second">{APP_TITLE_LINE2}</span>
+  </div>
   <div class="aa-subtitle">{APP_SUBTITLE}</div>
 </div>
 """,
