@@ -1452,7 +1452,7 @@ with sp_center:
         help="Repositions the notes within each chord for smoother movement and a more original sound."
     )
     if ENABLE_CHORD_TYPE_SLIDERS:
-    ensure_adv_defaults()
+        ensure_adv_defaults()
 
 
     # =========================================================
