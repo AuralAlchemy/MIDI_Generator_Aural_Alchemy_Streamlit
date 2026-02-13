@@ -50,8 +50,7 @@ DOWNLOAD_NAME = "MIDI_Progressions_Aural_Alchemy.zip"
 
 # =========================================================
 # PREMIUM CSS (Cinzel everywhere + cyan slider + shimmer + glows)
-# + Glass stack hero/panel design (like your screenshot)
-# + Geometry stays in deepest background layer
+# + Fix expander header glitching and slider value wrapping
 # =========================================================
 st.markdown(
     r"""
@@ -83,8 +82,8 @@ button, .stButton>button,
   letter-spacing: 0.55px !important;
 }
 
-/* Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
-[data-baseweb="icon"],
+/* ✅ Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
+[data-baseweb="icon"], 
 [data-baseweb="icon"] *,
 svg, svg * {
   font-family: "Material Icons", "Material Symbols Outlined", system-ui, sans-serif !important;
@@ -92,9 +91,6 @@ svg, svg * {
   text-transform: none !important;
 }
 
-/* Keep app content above geometry */
-[data-testid="stAppViewContainer"] { position: relative; z-index: 1; }
-.block-container { position: relative; z-index: 2; }
 
 /* ---- Page background ---- */
 .stApp {
@@ -105,27 +101,14 @@ svg, svg * {
     linear-gradient(180deg, #070A10 0%, #07080E 35%, #05060A 100%);
 }
 
-/* Vignette overlay (helps match the mockup depth) */
-.stApp::after{
-  content:"";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(800px 520px at 50% 18%, rgba(0,0,0,0.00), rgba(0,0,0,0.60) 78%),
-    radial-gradient(900px 700px at 50% 80%, rgba(0,0,0,0.05), rgba(0,0,0,0.70) 85%);
-}
-
 /* =========================================================
    SACRED GEOMETRY OVERLAY (two layers + slow rotation)
-   Keep this in the deepest background layer
 ========================================================= */
 .aa-geom-wrap{
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: -1;   /* was 0, now always behind */
+  z-index: 0;
   opacity: 0.90;
 }
 .aa-geom-1,
@@ -161,55 +144,19 @@ svg, svg * {
   50%      { opacity: 0.22; }
 }
 
-/* =========================================================
-   GLASS STACK HERO + PANEL (like your screenshot)
-========================================================= */
-
-/* Header (glass stack) */
+/* Header */
 .aa-hero {
   position: relative;
   z-index: 2;
   margin-top: 10px;
-  padding: 26px 26px 14px 26px;
-  border-radius: 22px;
-
-  background: linear-gradient(
-    135deg,
-    rgba(255,255,255,0.08),
-    rgba(255,255,255,0.02)
-  );
-  border: 1px solid rgba(255,255,255,0.14);
-  box-shadow:
-    0 22px 70px rgba(0,0,0,0.55),
-    inset 0 1px 0 rgba(255,255,255,0.10);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-
-  text-align: center;
-  margin-bottom: 28px;
-  overflow: hidden;
-}
-
-/* Inner plate */
-.aa-hero::before {
-  content: "";
-  position: absolute;
-  inset: 10px;
+  padding: 22px 22px 10px 22px;
   border-radius: 18px;
-  background: linear-gradient(
-    135deg,
-    rgba(0,229,255,0.06),
-    rgba(255,255,255,0.015),
-    rgba(255,215,0,0.04)
-  );
+  background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   border: 1px solid rgba(255,255,255,0.10);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.08),
-    0 10px 40px rgba(0,0,0,0.35);
-  pointer-events: none;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+  text-align: center;
+  margin-bottom: 26px;
 }
-.aa-hero > * { position: relative; z-index: 1; }
-
 .aa-title {
   font-size: clamp(30px, 7vw, 46px);
   font-weight: 700;
@@ -231,7 +178,6 @@ svg, svg * {
   color: transparent;
   text-shadow: 0 12px 30px rgba(0,0,0,0.55);
 }
-
 .aa-title-second{
   display:block;
   margin-top: 6px;
@@ -247,7 +193,6 @@ svg, svg * {
   font-size: 38px;
   letter-spacing: 2.5px;
 }
-
 .aa-subtitle {
   margin-top: 18px;
   font-size: 16px;
@@ -255,47 +200,17 @@ svg, svg * {
   letter-spacing: 1.1px !important;
 }
 
-/* Main panel (glass stack) */
+/* Panels */
 .aa-panel {
   position: relative;
   z-index: 2;
-  padding: 22px 22px 16px 22px;
-  border-radius: 22px;
-
-  background: linear-gradient(
-    135deg,
-    rgba(255,255,255,0.07),
-    rgba(255,255,255,0.02)
-  );
-  border: 1px solid rgba(255,255,255,0.13);
-  box-shadow:
-    0 22px 70px rgba(0,0,0,0.52),
-    inset 0 1px 0 rgba(255,255,255,0.09);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-
-  overflow: hidden;
-}
-
-/* Inner plate */
-.aa-panel::before {
-  content: "";
-  position: absolute;
-  inset: 12px;
+  padding: 18px 18px 12px 18px;
   border-radius: 18px;
-  background: linear-gradient(
-    135deg,
-    rgba(0,229,255,0.05),
-    rgba(255,255,255,0.012),
-    rgba(255,215,0,0.03)
-  );
-  border: 1px solid rgba(255,255,255,0.09);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.07),
-    0 10px 36px rgba(0,0,0,0.30);
-  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.42);
+  backdrop-filter: blur(8px);
 }
-.aa-panel > * { position: relative; z-index: 1; }
 
 /* Cyan slider styling */
 [data-testid="stSlider"] div[data-baseweb="slider"] div[role="slider"]{
@@ -362,6 +277,7 @@ div[data-baseweb="toggle"] input:checked + div{
 }
 @keyframes shimmer { 100% { left: 140%; } }
 
+
 /* Metrics */
 [data-testid="stMetric"] {
   border-radius: 16px !important;
@@ -402,7 +318,6 @@ div[data-baseweb="toggle"] input:checked + div{
   border: 1px solid rgba(255,255,255,0.14);
   box-shadow: 0 18px 60px rgba(0,0,0,0.45);
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   color: rgba(255,255,255,0.92);
   letter-spacing: 0.9px;
   font-size: 13px;
@@ -418,7 +333,7 @@ div[data-baseweb="toggle"] input:checked + div{
 /* Hide empty markdown paragraphs */
 div[data-testid="stMarkdownContainer"] > p:empty { display: none !important; }
 
-/* Fix expander header glitching */
+/* Fix expander header "overposting" glitch */
 [data-testid="stExpander"] summary,
 [data-testid="stExpander"] summary *{
   letter-spacing: 0px !important;
@@ -426,7 +341,7 @@ div[data-testid="stMarkdownContainer"] > p:empty { display: none !important; }
   line-height: 1.25 !important;
 }
 
-/* Fix slider tooltip numbers splitting vertically */
+/* FIX: slider tooltip numbers splitting vertically */
 [data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"],
 [data-testid="stSlider"] div[data-baseweb="slider"] [role="tooltip"] *{
   white-space: nowrap !important;
@@ -496,7 +411,6 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
-
 
 
 # =========================================================
