@@ -125,11 +125,11 @@ svg, svg * {
 }
 .aa-geom-1{
   opacity: 0.20;
-  animation: aaSpin1 600s linear infinite;
+  animation: aaSpin1 700s linear infinite;
 }
 .aa-geom-2{
   opacity: 0.18;
-  animation: aaSpin2 560s linear infinite, aaBreathe 8.5s ease-in-out infinite;
+  animation: aaSpin2 660s linear infinite, aaBreathe 8.5s ease-in-out infinite;
 }
 @keyframes aaSpin1{
   0%   { transform: rotate(0deg) scale(1.02); }
