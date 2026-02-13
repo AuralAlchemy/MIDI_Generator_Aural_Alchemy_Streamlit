@@ -653,12 +653,12 @@ def _build_deg_allowed(balance: Optional[Dict[str, int]]):
         min_pool = _apply_balance_to_pool(MIN_POOL_BASE, balance)
         sus_pool = _apply_balance_to_pool(SUS_POOL_SCALED_BASE, balance)
 
-        if not maj_pool:
+        # Only restore defaults if EVERYTHING is disabled (prevents 0 sliders being ignored)
+        if (not maj_pool) and (not min_pool) and (not sus_pool):
             maj_pool = MAJ_POOL_BASE[:]
-        if not min_pool:
             min_pool = MIN_POOL_BASE[:]
-        if not sus_pool:
             sus_pool = SUS_POOL_SCALED_BASE[:]
+
 
     return {
         0: maj_pool + sus_pool,
@@ -982,24 +982,47 @@ def generate_progressions(n: int, seed: int, chord_balance: Optional[Dict[str, i
 
 
 # =========================================================
-# CHORD -> MIDI + VOICING ENGINE
+# CHORD -> MIDI + VOICING ENGINE (SMOOTH PRO VERSION)
+# - Real voice-leading distance (minimal assignment)
+# - Explicit spacing rules (no weird holes/clusters unless forced)
+# - Bass stability penalty (ambient/piano feel)
+# - Keeps your cross-semitone repair + glue behavior
 # =========================================================
+
 NOTE_TO_SEMITONE = NOTE_TO_PC.copy()
 
+# Range
 LOW, HIGH = 48, 84
+
+# Register target
 TARGET_CENTER = 60.0
+
+# Span targets (overall chord spread)
 IDEAL_SPAN = 12
 MIN_SPAN = 8
 MAX_SPAN = 19
 
+# Adjacent spacing rules (inside the chord)
+MIN_ADJ_GAP = 2        # avoid tight clusters unless needed
+MAX_ADJ_GAP = 9        # avoid big holes
+HARD_MAX_ADJ_GAP = 12  # very likely "weird" if exceeded
+
+# Bass stability
+MAX_BASS_JUMP = 7      # semitones, larger jumps start to feel jumpy
+
+# Shared tones safety
 MAX_SHARED_DEFAULT = 2
 MAX_SHARED_MIN11 = 3
 
+# Raw-shape handling
 ENFORCE_NOT_RAW_WHEN_VOICING = True
+RAW_PENALTY = 1800     # raise if you want more "always different", lower if too strict
 
+# Glue behavior (semitone clusters)
 GLUE_LOW_CUTOFF = 48
 GLUE_PROBABILITY = 0.30
 
+# Resolution allowed for cross-semitone repair
 ALLOW_RESOLVE_TO_THIRD = True
 ALLOW_RESOLVE_TO_FIFTH = False
 
@@ -1056,22 +1079,26 @@ def chord_to_midi(chord_name: str, base_oct=3, low=LOW, high=HIGH) -> List[int]:
     return sorted(set(int(x) for x in notes))
 
 
-def clamp_to_range(notes):
+def clamp_to_range(notes: List[int]) -> List[int]:
     out = []
     for p in notes:
         while p < LOW:
             p += 12
         while p > HIGH:
             p -= 12
-        out.append(p)
+        out.append(int(p))
     return sorted(out)
 
 
-def span(notes):
-    return max(notes) - min(notes)
+def span(notes: List[int]) -> int:
+    if not notes:
+        return 0
+    return int(max(notes) - min(notes))
 
 
-def center(notes):
+def center(notes: List[int]) -> float:
+    if not notes:
+        return TARGET_CENTER
     return (min(notes) + max(notes)) / 2.0
 
 
@@ -1089,14 +1116,16 @@ def glue_ok(notes: List[int], rng: random.Random) -> bool:
     if not pairs:
         return True
 
+    # If any semitone cluster is too low, avoid it (mud)
     for a, b in pairs:
         if a < GLUE_LOW_CUTOFF or b < GLUE_LOW_CUTOFF:
             return False
 
+    # Otherwise, allow some clusters (glue) probabilistically
     return rng.random() < GLUE_PROBABILITY
 
 
-def shared_pitch_count(a, b):
+def shared_pitch_count(a: List[int], b: List[int]) -> int:
     return len(set(a) & set(b))
 
 
@@ -1105,47 +1134,12 @@ def is_min11_name(ch_name: str) -> bool:
     return ("min11" in s)
 
 
-def max_shared_allowed(prev_name, cur_name):
+def max_shared_allowed(prev_name: str, cur_name: str) -> int:
     return MAX_SHARED_MIN11 if (is_min11_name(prev_name) or is_min11_name(cur_name)) else MAX_SHARED_DEFAULT
 
 
-def is_raw_shape(v, raw_notes):
+def is_raw_shape(v: List[int], raw_notes: List[int]) -> bool:
     return sorted(v) == sorted(clamp_to_range(raw_notes))
-
-
-def total_move(prev, cur):
-    p = sorted(prev)
-    c = sorted(cur)
-    if len(p) == len(c):
-        return sum(abs(c[i] - p[i]) for i in range(len(p)))
-    return abs(center(c) - center(p)) * 2.0
-
-
-def generate_voicing_candidates(raw_notes):
-    base = clamp_to_range(raw_notes)
-    base = sorted(set(base))
-    shifts = (-12, 0, 12)
-    candidates = set()
-
-    def rec(i, cur):
-        if i == len(base):
-            v = clamp_to_range(cur)
-            if len(set(v)) == len(set(base)):
-                candidates.add(tuple(sorted(v)))
-            return
-        for s in shifts:
-            rec(i + 1, cur + [base[i] + s])
-
-    rec(0, [])
-
-    inv = base[:]
-    for _ in range(len(base) - 1):
-        inv = inv[1:] + [inv[0] + 12]
-        candidates.add(tuple(clamp_to_range(inv)))
-
-    out = [list(c) for c in candidates]
-    out = [v for v in out if len(set(v)) == len(set(base))]
-    return out if out else [base]
 
 
 def allowed_resolution_pcs(key: str) -> set:
@@ -1166,9 +1160,8 @@ def allowed_resolution_pcs(key: str) -> set:
 
 def bad_cross_semitone_indices(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set) -> List[int]:
     prev_set = set(prev_notes)
-    cur = list(cur_notes)
     bad = []
-    for i, n in enumerate(cur):
+    for i, n in enumerate(list(cur_notes)):
         if (n - 1) in prev_set or (n + 1) in prev_set:
             if (n % 12) not in allowed_target_pcs:
                 bad.append(i)
@@ -1187,6 +1180,7 @@ def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_
         for idx in bad_idxs:
             n = v[idx]
             options = []
+
             for delta in (+12, -12):
                 n2 = n + delta
                 if n2 < LOW or n2 > HIGH:
@@ -1199,17 +1193,133 @@ def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_
                 test = sorted(test)
 
                 remaining = len(bad_cross_semitone_indices(prev_notes, test, allowed_target_pcs))
-                options.append((remaining, abs(center(test) - TARGET_CENTER), test))
+                options.append((remaining, abs(center(test) - TARGET_CENTER), span(test), test))
 
             if options:
-                options.sort(key=lambda x: (x[0], x[1]))
-                v = options[0][2]
+                options.sort(key=lambda x: (x[0], x[1], x[2]))
+                v = options[0][3]
                 changed_any = True
 
         if not changed_any:
             break
 
     return v
+
+
+def adjacent_gaps(notes: List[int]) -> List[int]:
+    v = sorted(notes)
+    if len(v) < 2:
+        return []
+    return [v[i + 1] - v[i] for i in range(len(v) - 1)]
+
+
+def spacing_penalty(notes: List[int]) -> float:
+    gaps = adjacent_gaps(notes)
+    if not gaps:
+        return 0.0
+
+    pen = 0.0
+    for g in gaps:
+        # Too tight
+        if g < MIN_ADJ_GAP:
+            pen += (MIN_ADJ_GAP - g) * 900.0
+        # Too open
+        if g > MAX_ADJ_GAP:
+            pen += (g - MAX_ADJ_GAP) * 420.0
+        # Extremely open = almost always weird
+        if g > HARD_MAX_ADJ_GAP:
+            pen += (g - HARD_MAX_ADJ_GAP) * 1200.0
+    return pen
+
+
+def bass_penalty(prev: Optional[List[int]], cur: List[int]) -> float:
+    if prev is None or not prev:
+        return 0.0
+    b0 = min(prev)
+    b1 = min(cur)
+    jump = abs(b1 - b0)
+    if jump <= MAX_BASS_JUMP:
+        return 0.0
+    return (jump - MAX_BASS_JUMP) * 260.0
+
+
+def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
+    """
+    Real voice-leading distance.
+    For equal sizes: minimal assignment between voices (permutations).
+    For different sizes: nearest-neighbor distance sum (stable, small n).
+    """
+    p = sorted(prev)
+    c = sorted(cur)
+    if not p or not c:
+        return 0.0
+
+    if len(p) != len(c):
+        total = 0.0
+        for x in c:
+            total += min(abs(x - y) for y in p)
+        return float(total)
+
+    import itertools
+    best = None
+    for perm in itertools.permutations(c):
+        s = 0.0
+        for i in range(len(p)):
+            s += abs(perm[i] - p[i])
+        if best is None or s < best:
+            best = s
+    return float(best if best is not None else 0.0)
+
+
+def generate_voicing_candidates(raw_notes: List[int]) -> List[List[int]]:
+    """
+    Candidate generation that prefers musical shapes:
+    - inversions
+    - controlled open voicings (shift top or bottom voices)
+    - gentle recenters
+    Avoids per-note octave chaos that creates weird spacing.
+    """
+    base = sorted(set(clamp_to_range(raw_notes)))
+    n = len(base)
+    if n == 0:
+        return []
+
+    candidates = set()
+
+    def add_candidate(v):
+        v = sorted(set(clamp_to_range(v)))
+        if len(v) == n:
+            candidates.add(tuple(v))
+
+    # Base
+    add_candidate(base)
+
+    # Inversions
+    inv = base[:]
+    for _ in range(n - 1):
+        inv = inv[1:] + [inv[0] + 12]
+        add_candidate(inv)
+
+    # Controlled open voicings
+    for k in range(1, n):
+        # shift top k up
+        v1 = base[:]
+        for i in range(n - k, n):
+            v1[i] += 12
+        add_candidate(v1)
+
+        # shift bottom k down
+        v2 = base[:]
+        for i in range(0, k):
+            v2[i] -= 12
+        add_candidate(v2)
+
+    # Gentle recenter variants
+    for shift in (-12, 0, 12):
+        add_candidate([x + shift for x in base])
+
+    out = [list(c) for c in candidates]
+    return out if out else [base]
 
 
 def choose_best_voicing(
@@ -1220,58 +1330,65 @@ def choose_best_voicing(
     key_name: str,
     rng: random.Random
 ) -> List[int]:
-    cands = generate_voicing_candidates(raw_notes)
     raw_clamped = clamp_to_range(raw_notes)
+    cands = generate_voicing_candidates(raw_notes)
 
+    # Glue filter (optional musical color)
     filtered = [v for v in cands if glue_ok(v, rng)]
     if filtered:
         cands = filtered
 
+    # Repair cross-semitone clashes vs previous chord
     if prev_voicing is not None:
         allowed_pcs = allowed_resolution_pcs(key_name)
         cands = [repair_cross_semitones(prev_voicing, v, allowed_pcs) for v in cands]
 
-    if ENFORCE_NOT_RAW_WHEN_VOICING:
-        non_raw = [v for v in cands if not is_raw_shape(v, raw_clamped)]
-        if non_raw:
-            cands = non_raw
-
+    # Shared pitch cap
     if prev_voicing is not None:
         limit = max_shared_allowed(prev_name, cur_name)
         filtered = [v for v in cands if shared_pitch_count(prev_voicing, v) <= limit]
         if filtered:
             cands = filtered
 
-    def cost(v):
+    def cost(v: List[int]) -> float:
         v = sorted(v)
-        reg_pen = abs(center(v) - TARGET_CENTER) * 120
 
+        # Register
+        reg_pen = abs(center(v) - TARGET_CENTER) * 120.0
+
+        # Span
         sp = span(v)
-        span_pen = abs(sp - IDEAL_SPAN) * 80
+        span_pen = abs(sp - IDEAL_SPAN) * 80.0
         if sp < MIN_SPAN:
-            span_pen += (MIN_SPAN - sp) * 700
+            span_pen += (MIN_SPAN - sp) * 700.0
         if sp > MAX_SPAN:
-            span_pen += (sp - MAX_SPAN) * 220
+            span_pen += (sp - MAX_SPAN) * 220.0
 
-        move_pen = 0 if prev_voicing is None else total_move(prev_voicing, v) * 3
-        repeat_pen = 2500 if (prev_voicing is not None and sorted(prev_voicing) == v) else 0
+        # Internal spacing
+        space_pen = spacing_penalty(v)
 
-        shared_pen = 0
-        if prev_voicing is not None:
-            limit = max_shared_allowed(prev_name, cur_name)
-            sh = shared_pitch_count(prev_voicing, v)
-            if sh > limit:
-                shared_pen = (sh - limit) * 6000
+        # Movement (real voice-leading)
+        move_pen = 0.0 if prev_voicing is None else _min_assignment_move(prev_voicing, v) * 3.2
 
-        raw_pen = 100000 if (ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped)) else 0
+        # Bass stability
+        b_pen = bass_penalty(prev_voicing, v)
 
-        cross_pen = 0
+        # Avoid exact repeats
+        repeat_pen = 900.0 if (prev_voicing is not None and sorted(prev_voicing) == v) else 0.0
+
+        # Penalize raw shape when voicing is enabled
+        raw_pen = 0.0
+        if ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped):
+            raw_pen = RAW_PENALTY
+
+        # Cross-semitone leftover (hard penalty)
+        cross_pen = 0.0
         if prev_voicing is not None:
             allowed_pcs = allowed_resolution_pcs(key_name)
             bad_left = len(bad_cross_semitone_indices(prev_voicing, v, allowed_pcs))
-            cross_pen = bad_left * 25000
+            cross_pen = bad_left * 25000.0
 
-        return reg_pen + span_pen + move_pen + repeat_pen + shared_pen + raw_pen + cross_pen
+        return reg_pen + span_pen + space_pen + move_pen + b_pen + repeat_pen + raw_pen + cross_pen
 
     cands.sort(key=cost)
     return sorted(cands[0])
