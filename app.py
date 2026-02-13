@@ -1507,6 +1507,7 @@ with sp_center:
         "Seed (optional)",
         value="",
         help="Enter a number to regenerate the exact same result."
+    )
 
     revoice = st.toggle(
         "Re-Voicing",
