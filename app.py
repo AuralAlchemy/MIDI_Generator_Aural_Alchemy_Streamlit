@@ -392,13 +392,21 @@ GEOM_SVG = """
   </g>
 </svg>
 """
+
+# Second layer SVG WITHOUT triangle
+GEOM_SVG_NO_TRIANGLE = GEOM_SVG.replace(
+    '<polygon points="600,220 929.1,790 270.9,790" opacity="0.90"/>',
+    ''
+)
+
 GEOM_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(GEOM_SVG.encode("utf-8")).decode("utf-8")
+GEOM_DATA_URI_NO_TRIANGLE = "data:image/svg+xml;base64," + base64.b64encode(GEOM_SVG_NO_TRIANGLE.encode("utf-8")).decode("utf-8")
 
 st.markdown(
     f"""
 <div class="aa-geom-wrap">
   <div class="aa-geom-1" style="background-image:url('{GEOM_DATA_URI}');"></div>
-  <div class="aa-geom-2" style="background-image:url('{GEOM_DATA_URI}');"></div>
+  <div class="aa-geom-2" style="background-image:url('{GEOM_DATA_URI_NO_TRIANGLE}');"></div>
 </div>
 """,
     unsafe_allow_html=True,
