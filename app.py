@@ -8,6 +8,7 @@
 # - ADVANCED: Chord Type Balance sliders (optional, can be disabled via flag)
 # - ADVANCED: Reset sliders to default (50)
 # - ZIP name: adds "_Revoiced" when re-voicing is enabled
+# - NEW: Optional banlist .txt upload to exclude exact-order progressions
 
 import os
 import re
@@ -82,7 +83,7 @@ button, .stButton>button,
   letter-spacing: 0.55px !important;
 }
 
-/* ✅ Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
+/* Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
 [data-baseweb="icon"], 
 [data-baseweb="icon"] *,
 svg, svg * {
@@ -90,7 +91,6 @@ svg, svg * {
   letter-spacing: 0 !important;
   text-transform: none !important;
 }
-
 
 /* ---- Page background ---- */
 .stApp {
@@ -276,7 +276,6 @@ div[data-baseweb="toggle"] input:checked + div{
   animation: shimmer 1.2s ease;
 }
 @keyframes shimmer { 100% { left: 140%; } }
-
 
 /* Metrics */
 [data-testid="stMetric"] {
@@ -506,6 +505,140 @@ def _wchoice(rng: random.Random, items_with_w):
 
 
 # =========================================================
+# BANLIST (UPLOAD TXT) - Progression blacklist (EXACT ORDER)
+# - One progression per line: Cmin-Gmin-Fmin etc
+# - Separators supported: -, comma, |, ; (and similar)
+# - Comments supported: # or //
+# - Exact-order matching (start chord matters)
+# =========================================================
+
+def _normalize_chord_token(ch: str) -> Optional[str]:
+    """
+    Returns canonical chord like 'Cmin7', 'Fsus2add9', 'Cmaj' (if bare root),
+    or None if invalid/unrecognized.
+    Supports slash chords like 'Cmin/G' if bass note is valid.
+    """
+    if not ch:
+        return None
+
+    s = str(ch).strip()
+    if not s:
+        return None
+
+    # Normalize unicode dashes and accidental symbols
+    s = s.replace("–", "-").replace("—", "-").replace("−", "-")
+    s = s.replace("♭", "b").replace("♯", "#")
+    s = s.replace(" ", "")
+
+    bass = None
+    if "/" in s:
+        main, bass = s.split("/", 1)
+        main = main.strip()
+        bass = bass.strip()
+        if bass not in NOTE_TO_PC:
+            return None
+    else:
+        main = s
+
+    m = re.match(r"^([A-G](?:#|b)?)(.*)$", main)
+    if not m:
+        return None
+
+    root = m.group(1)
+    rest = (m.group(2) or "").strip()
+
+    if root not in NOTE_TO_PC:
+        return None
+
+    q = rest.lower().replace("6/9", "6add9")
+
+    # Minor shorthand
+    if q in ("m", "-", "min", "minor"):
+        q = "min"
+    if q.startswith("m") and not q.startswith("maj"):
+        # m7 -> min7, m9 -> min9, m11 -> min11
+        q = q.replace("m", "min", 1)
+
+    # Major shorthand
+    if q in ("maj", "major"):
+        q = "maj"
+
+    # Bare root means maj
+    if q == "":
+        q = "maj"
+
+    if q not in QUAL_TO_INTERVALS:
+        return None
+
+    if bass:
+        return f"{root}{q}/{bass}"
+    return f"{root}{q}"
+
+
+def _ban_key_exact(chords: List[str]) -> Tuple[str, ...]:
+    return tuple(chords)
+
+
+def parse_banlist_txt(uploaded_file) -> Tuple[set, Dict[str, int]]:
+    """
+    Reads a .txt file where each line is a progression to ban (exact order).
+    Example line: Cmin-Gmin-Fmin
+    Returns (banned_set, stats).
+    """
+    banned = set()
+    stats = {"lines": 0, "added": 0, "skipped_empty": 0, "skipped_invalid": 0}
+
+    if uploaded_file is None:
+        return banned, stats
+
+    try:
+        raw = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+    except Exception:
+        try:
+            raw = uploaded_file.read().decode("utf-8", errors="ignore")
+        except Exception:
+            return banned, stats
+
+    for line in raw.splitlines():
+        stats["lines"] += 1
+        s = line.strip()
+        if not s:
+            stats["skipped_empty"] += 1
+            continue
+
+        # Remove comments (# or //)
+        s = re.split(r"(#|//)", s, maxsplit=1)[0].strip()
+        if not s:
+            stats["skipped_empty"] += 1
+            continue
+
+        # Tokenize by common separators: -, , | ; /
+        parts = re.split(r"\s*[-,|;]+\s*", s)
+        parts = [p.strip() for p in parts if p.strip()]
+        if len(parts) < 2:
+            stats["skipped_invalid"] += 1
+            continue
+
+        normalized = []
+        ok = True
+        for token in parts:
+            canon = _normalize_chord_token(token)
+            if canon is None:
+                ok = False
+                break
+            normalized.append(canon)
+
+        if not ok:
+            stats["skipped_invalid"] += 1
+            continue
+
+        banned.add(_ban_key_exact(normalized))
+        stats["added"] += 1
+
+    return banned, stats
+
+
+# =========================================================
 # GENERATOR SETTINGS
 # =========================================================
 PATTERN_MAX_REPEATS = 1
@@ -608,17 +741,8 @@ def _pattern_fingerprint(degs, quals):
 
 # =========================================================
 # CHORD TYPE BALANCE (ADVANCED) + STRICT MODE
-# - Sliders are 0..100 with default 50.
-# - 50 = neutral
-# - 0  = disabled
-# - 100 = strongly favored
-#
-# STRICT_SLIDERS:
-# If user sets ONLY SUS >0 (others 0) => ONLY SUS chords.
-# Same for any single chord type.
-# If impossible under diatonic + templates + uniqueness => clean failure (no fallback).
 # =========================================================
-STRICT_SLIDERS = True  # ✅ True = sliders act like hard rules
+STRICT_SLIDERS = True  # True = sliders act like hard rules
 
 ADV_ALL_QUALITIES = [
     "maj9","maj7","add9","6add9","6","maj",
@@ -663,7 +787,6 @@ def _build_deg_allowed(balance: Optional[Dict[str, int]], key: str) -> Dict[int,
 
         for q in enabled:
             if _is_diatonic_chord(key, root, q):
-                # weights only bias selection WITHIN enabled set
                 w = 1.0
                 if balance:
                     w = max(1e-9, _balance_factor(balance.get(q, ADV_DEFAULT_VALUE)))
@@ -687,7 +810,6 @@ def _pick_quality_diatonic(
     if not pool:
         return None
     return _wchoice(rng, pool)
-
 
 
 def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: list):
@@ -751,20 +873,14 @@ def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: 
 
 
 def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int, deg_allowed):
-    # STRICT-safe quality picking:
-    # - _pick_quality_diatonic() returns None if this degree has no allowed qualities (under strict sliders)
-    # - returning None here simply rejects this template and tries another
     quals = []
     for d in degs:
         q = _pick_quality_diatonic(rng, key, d, deg_allowed=deg_allowed)
         if q is None:
-            return None  # strict: this template can't work with enabled chord types
+            return None
         quals.append(q)
 
-    # =========================================================
-    # RULE: Do not allow progression to start with SUS chord
-    # unless SUS sliders are strongly boosted (>80)
-    # =========================================================
+    # RULE: Do not allow progression to start with SUS chord unless SUS sliders > 80
     def is_sus(q: str) -> bool:
         return q.startswith("sus")
 
@@ -777,9 +893,6 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
     if is_sus(quals[0]) and not sus_allowed_start:
         return None
 
-    # STRICT mode note:
-    # _dedupe_inside_progression() should early-return (degs, quals) without mutating,
-    # so your "only X chord types" rule isn't violated.
     ded = _dedupe_inside_progression(rng, key, degs[:], quals[:])
     if ded is None:
         return None
@@ -787,32 +900,19 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
 
     roots = [SCALES[key][d] for d in degs]
 
-    # Keep diatonic safety
     if any(not _is_diatonic_chord(key, r, q) for r, q in zip(roots, quals)):
         return None
 
-    # Keep loop shared-tone safety
     if not _shared_tone_ok_loop(roots, quals, need=MIN_SHARED_TONES, loop=True):
         return None
 
-
-    # =========================================================
-    # SUS SAFETY SYSTEM (default + sus-heavy mode)
-    # - Default mode keeps sus tasteful and avoids random sus fog
-    # - Sus-heavy mode activates when user boosts sus sliders, allowing 100% sus
-    #   while enforcing strong overlap and musical root movement
-    # =========================================================
-
-    # detect sus-heavy mode from chord_balance sliders (0..100)
+    # SUS SAFETY SYSTEM
     sus_keys = ["sus2", "sus4", "sus2add9", "sus4add9"]
     avg_sus_weight = 1.0
     if chord_balance:
         vals = [_balance_factor(chord_balance.get(k, ADV_DEFAULT_VALUE)) for k in sus_keys]
         avg_sus_weight = sum(vals) / len(vals)
     sus_heavy = avg_sus_weight >= 1.35
-
-    def is_sus(q: str) -> bool:
-        return q.startswith("sus")
 
     def is_sus4ish(q: str) -> bool:
         return q.startswith("sus4")
@@ -828,19 +928,14 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
     pcs = [_chord_pc_set_real(r, q) for r, q in zip(roots, quals)]
     root_pcs = [_pc(r) for r in roots]
 
-    # Default mode constraints
-    DEFAULT_SUS_MAX_RATIO = 0.45    # max 45% of chords in a progression can be sus
-    DEFAULT_SUS4_MAX_COUNT = 1      # only 1 sus4/sus4add9 per progression
-    DEFAULT_NEED_IF_SUS = 2         # shared tones when either chord is sus*
-    DEFAULT_NEED_IF_SUS4 = 3        # shared tones when either chord is sus4*
+    DEFAULT_SUS_MAX_RATIO = 0.45
+    DEFAULT_SUS4_MAX_COUNT = 1
+    DEFAULT_NEED_IF_SUS = 2
+    DEFAULT_NEED_IF_SUS4 = 3
 
-    # Sus-heavy constraints
-    HEAVY_NEED = 2                  # baseline shared tones
-    HEAVY_NEED_IF_SUS4 = 3          # stricter when sus4 involved
+    HEAVY_NEED = 2
+    HEAVY_NEED_IF_SUS4 = 3
     HEAVY_REQUIRE_STEP_OR_REPEAT = True
-
-    # Allow sus4 -> sus4 only if "safe":
-    # shared >= 3 OR stepwise root motion (<=2 semitones) OR same root
     ALLOW_SUS4_TO_SUS4_IF_SAFE = True
 
     if not sus_heavy:
@@ -853,7 +948,7 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
     has_repeat_root = (len(set(root_pcs)) < len(root_pcs))
 
     for i in range(m):
-        j = (i + 1) % m  # includes loop-back
+        j = (i + 1) % m
 
         shared = len(pcs[i] & pcs[j])
         iv = pc_interval(root_pcs[i], root_pcs[j])
@@ -928,10 +1023,17 @@ def _pick_keys_even(n: int, rng: random.Random) -> list:
     return out
 
 
-def generate_progressions(n: int, seed: int, chord_balance: Optional[Dict[str, int]] = None):
+def generate_progressions(
+    n: int,
+    seed: int,
+    chord_balance: Optional[Dict[str, int]] = None,
+    banned_progressions: Optional[set] = None
+):
     rng = random.Random(seed)
     keys = _pick_keys_even(n, rng)
-    deg_allowed = None  # built per key inside loop
+    deg_allowed = None
+
+    banned_progressions = banned_progressions or set()
 
     max_pattern_dupes = int(math.floor(n * MAX_PATTERN_DUPLICATE_RATIO))
     pattern_dupe_used = 0
@@ -945,7 +1047,7 @@ def generate_progressions(n: int, seed: int, chord_balance: Optional[Dict[str, i
 
     for i in range(n):
         key = keys[i]
-        deg_allowed = _build_deg_allowed(chord_balance, key)  # ✅ key-aware + strict
+        deg_allowed = _build_deg_allowed(chord_balance, key)
         built = None
 
         for _ in range(MAX_TRIES_PER_PROG):
@@ -957,6 +1059,10 @@ def generate_progressions(n: int, seed: int, chord_balance: Optional[Dict[str, i
                 continue
 
             chords, durs, _k, degs_used, quals_used = res
+
+            # Banlist check (EXACT order)
+            if _ban_key_exact(list(chords)) in banned_progressions:
+                continue
 
             ek = tuple(chords)
             if ek in used_exact:
@@ -987,49 +1093,33 @@ def generate_progressions(n: int, seed: int, chord_balance: Optional[Dict[str, i
     return out, pattern_dupe_used, max_pattern_dupes, low_sim_total, qual_usage
 
 
-
 # =========================================================
 # CHORD -> MIDI + VOICING ENGINE (SMOOTH PRO VERSION)
-# - Real voice-leading distance (minimal assignment)
-# - Explicit spacing rules (no weird holes/clusters unless forced)
-# - Bass stability penalty (ambient/piano feel)
-# - Keeps your cross-semitone repair + glue behavior
 # =========================================================
-
 NOTE_TO_SEMITONE = NOTE_TO_PC.copy()
 
-# Range
 LOW, HIGH = 48, 84
-
-# Register target
 TARGET_CENTER = 60.0
 
-# Span targets (overall chord spread)
 IDEAL_SPAN = 12
 MIN_SPAN = 8
 MAX_SPAN = 19
 
-# Adjacent spacing rules (inside the chord)
-MIN_ADJ_GAP = 2        # avoid tight clusters unless needed
-MAX_ADJ_GAP = 9        # avoid big holes
-HARD_MAX_ADJ_GAP = 12  # very likely "weird" if exceeded
+MIN_ADJ_GAP = 2
+MAX_ADJ_GAP = 9
+HARD_MAX_ADJ_GAP = 12
 
-# Bass stability
-MAX_BASS_JUMP = 7      # semitones, larger jumps start to feel jumpy
+MAX_BASS_JUMP = 7
 
-# Shared tones safety
 MAX_SHARED_DEFAULT = 2
 MAX_SHARED_MIN11 = 3
 
-# Raw-shape handling
 ENFORCE_NOT_RAW_WHEN_VOICING = True
-RAW_PENALTY = 1800     # raise if you want more "always different", lower if too strict
+RAW_PENALTY = 1800
 
-# Glue behavior (semitone clusters)
 GLUE_LOW_CUTOFF = 48
 GLUE_PROBABILITY = 0.30
 
-# Resolution allowed for cross-semitone repair
 ALLOW_RESOLVE_TO_THIRD = True
 ALLOW_RESOLVE_TO_FIFTH = False
 
@@ -1123,12 +1213,10 @@ def glue_ok(notes: List[int], rng: random.Random) -> bool:
     if not pairs:
         return True
 
-    # If any semitone cluster is too low, avoid it (mud)
     for a, b in pairs:
         if a < GLUE_LOW_CUTOFF or b < GLUE_LOW_CUTOFF:
             return False
 
-    # Otherwise, allow some clusters (glue) probabilistically
     return rng.random() < GLUE_PROBABILITY
 
 
@@ -1227,13 +1315,10 @@ def spacing_penalty(notes: List[int]) -> float:
 
     pen = 0.0
     for g in gaps:
-        # Too tight
         if g < MIN_ADJ_GAP:
             pen += (MIN_ADJ_GAP - g) * 900.0
-        # Too open
         if g > MAX_ADJ_GAP:
             pen += (g - MAX_ADJ_GAP) * 420.0
-        # Extremely open = almost always weird
         if g > HARD_MAX_ADJ_GAP:
             pen += (g - HARD_MAX_ADJ_GAP) * 1200.0
     return pen
@@ -1251,11 +1336,6 @@ def bass_penalty(prev: Optional[List[int]], cur: List[int]) -> float:
 
 
 def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
-    """
-    Real voice-leading distance.
-    For equal sizes: minimal assignment between voices (permutations).
-    For different sizes: nearest-neighbor distance sum (stable, small n).
-    """
     p = sorted(prev)
     c = sorted(cur)
     if not p or not c:
@@ -1279,13 +1359,6 @@ def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
 
 
 def generate_voicing_candidates(raw_notes: List[int]) -> List[List[int]]:
-    """
-    Candidate generation that prefers musical shapes:
-    - inversions
-    - controlled open voicings (shift top or bottom voices)
-    - gentle recenters
-    Avoids per-note octave chaos that creates weird spacing.
-    """
     base = sorted(set(clamp_to_range(raw_notes)))
     n = len(base)
     if n == 0:
@@ -1298,30 +1371,24 @@ def generate_voicing_candidates(raw_notes: List[int]) -> List[List[int]]:
         if len(v) == n:
             candidates.add(tuple(v))
 
-    # Base
     add_candidate(base)
 
-    # Inversions
     inv = base[:]
     for _ in range(n - 1):
         inv = inv[1:] + [inv[0] + 12]
         add_candidate(inv)
 
-    # Controlled open voicings
     for k in range(1, n):
-        # shift top k up
         v1 = base[:]
         for i in range(n - k, n):
             v1[i] += 12
         add_candidate(v1)
 
-        # shift bottom k down
         v2 = base[:]
         for i in range(0, k):
             v2[i] -= 12
         add_candidate(v2)
 
-    # Gentle recenter variants
     for shift in (-12, 0, 12):
         add_candidate([x + shift for x in base])
 
@@ -1340,22 +1407,18 @@ def choose_best_voicing(
     raw_clamped = clamp_to_range(raw_notes)
     cands = generate_voicing_candidates(raw_notes)
 
-    # Glue filter (optional musical color)
     filtered = [v for v in cands if glue_ok(v, rng)]
     if filtered:
         cands = filtered
 
-    # Repair cross-semitone clashes vs previous chord
     if prev_voicing is not None:
         allowed_pcs = allowed_resolution_pcs(key_name)
         cands = [repair_cross_semitones(prev_voicing, v, allowed_pcs) for v in cands]
-    # ✅ Re-filter glue AFTER repair (prevents new low semitone clusters)
+
     filtered = [v for v in cands if glue_ok(v, rng)]
     if filtered:
         cands = filtered
-    
 
-    # Shared pitch cap
     if prev_voicing is not None:
         limit = max_shared_allowed(prev_name, cur_name)
         filtered = [v for v in cands if shared_pitch_count(prev_voicing, v) <= limit]
@@ -1365,10 +1428,8 @@ def choose_best_voicing(
     def cost(v: List[int]) -> float:
         v = sorted(v)
 
-        # Register
         reg_pen = abs(center(v) - TARGET_CENTER) * 120.0
 
-        # Span
         sp = span(v)
         span_pen = abs(sp - IDEAL_SPAN) * 80.0
         if sp < MIN_SPAN:
@@ -1376,24 +1437,18 @@ def choose_best_voicing(
         if sp > MAX_SPAN:
             span_pen += (sp - MAX_SPAN) * 220.0
 
-        # Internal spacing
         space_pen = spacing_penalty(v)
 
-        # Movement (real voice-leading)
         move_pen = 0.0 if prev_voicing is None else _min_assignment_move(prev_voicing, v) * 3.2
 
-        # Bass stability
         b_pen = bass_penalty(prev_voicing, v)
 
-        # Avoid exact repeats
         repeat_pen = 900.0 if (prev_voicing is not None and sorted(prev_voicing) == v) else 0.0
 
-        # Penalize raw shape when voicing is enabled
         raw_pen = 0.0
         if ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped):
             raw_pen = RAW_PENALTY
 
-        # Cross-semitone leftover (hard penalty)
         cross_pen = 0.0
         if prev_voicing is not None:
             allowed_pcs = allowed_resolution_pcs(key_name)
@@ -1570,7 +1625,7 @@ def make_rows(progressions):
             "#": i,
             "Key": key,
             "Bars": int(sum(durs)),
-            "Chords": " – ".join(chords),
+            "Chords": " - ".join(chords),
         })
     return rows
 
@@ -1578,7 +1633,6 @@ def make_rows(progressions):
 # =========================================================
 # ADVANCED SETTINGS (UI + STATE)
 # =========================================================
-# DEV ONLY: disable the slider feature here (not in the UI)
 ENABLE_CHORD_TYPE_SLIDERS = True
 
 ADV_QUALITIES = [
@@ -1652,13 +1706,32 @@ with sp_center:
         help="Repositions the notes within each chord for smoother movement and a more original sound.",
     )
 
+    # NEW: BANLIST UPLOADER
+    with st.expander("BANLIST (optional)", expanded=False):
+        st.caption("Upload a .txt with progressions to exclude (one per line). Example: Cmin-Gmin-Fmin")
+        ban_file = st.file_uploader(
+            "Upload banlist .txt",
+            type=["txt"],
+            accept_multiple_files=False,
+        )
+
+        banned_set, ban_stats = parse_banlist_txt(ban_file)
+        st.session_state["aa_banned_set"] = banned_set
+
+        if ban_file is not None:
+            st.info(
+                f"Banlist loaded. Added: {ban_stats['added']} | Invalid lines: {ban_stats['skipped_invalid']} | Empty: {ban_stats['skipped_empty']}"
+            )
+        else:
+            st.session_state["aa_banned_set"] = set()
+
     # ADVANCED SETTINGS UI (single render, no duplicates)
     if ENABLE_CHORD_BALANCE_FEATURE and ENABLE_CHORD_TYPE_SLIDERS:
         ensure_adv_defaults()
 
         with st.expander("ADVANCED SETTINGS", expanded=False):
             st.caption("Chord type balance: 0 disables. 50 is default. 100 strongly favors.")
-        
+
             cL, cM, cR = st.columns([1, 2, 1])
             with cM:
                 if st.button("Default", use_container_width=False, key="aa_reset_defaults"):
@@ -1701,11 +1774,13 @@ if generate_clicked:
                 seed = int(np.random.randint(1, 2_000_000_000))
 
             chord_balance = read_adv_balance() if ENABLE_CHORD_BALANCE_FEATURE else None
+            banned_set = st.session_state.get("aa_banned_set", set())
 
             progressions, pattern_dupe_used, pattern_dupe_max, low_sim_total, qual_usage = generate_progressions(
                 n=int(n_progressions),
                 seed=seed,
                 chord_balance=chord_balance,
+                banned_progressions=banned_set,
             )
 
             if low_sim_total != 0:
