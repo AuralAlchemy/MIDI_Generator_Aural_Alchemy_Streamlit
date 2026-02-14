@@ -7,8 +7,8 @@
 # - Sacred geometry mandala overlay (two layers + slow rotation)
 # - ADVANCED: Chord Type Balance sliders (optional, can be disabled via flag)
 # - ADVANCED: Reset sliders to default (50)
+# - BANLIST: Upload a .txt with progressions to exclude (ordered match, start matters)
 # - ZIP name: adds "_Revoiced" when re-voicing is enabled
-# - NEW: Optional banlist .txt upload to exclude exact-order progressions
 
 import os
 import re
@@ -83,7 +83,7 @@ button, .stButton>button,
   letter-spacing: 0.55px !important;
 }
 
-/* Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
+/* ✅ Restore Streamlit/BaseWeb icon fonts (prevents ARROW_* text showing) */
 [data-baseweb="icon"], 
 [data-baseweb="icon"] *,
 svg, svg * {
@@ -505,137 +505,125 @@ def _wchoice(rng: random.Random, items_with_w):
 
 
 # =========================================================
-# BANLIST (UPLOAD TXT) - Progression blacklist (EXACT ORDER)
-# - One progression per line: Cmin-Gmin-Fmin etc
-# - Separators supported: -, comma, |, ; (and similar)
-# - Comments supported: # or //
-# - Exact-order matching (start chord matters)
+# BANLIST (TXT UPLOAD) — tolerant parser + ordered matching
 # =========================================================
+BAN_KEY = "aa_banlist_v1"
 
-def _normalize_chord_token(ch: str) -> Optional[str]:
+def _normalize_chord_token(ch: str) -> str:
     """
-    Returns canonical chord like 'Cmin7', 'Fsus2add9', 'Cmaj' (if bare root),
-    or None if invalid/unrecognized.
-    Supports slash chords like 'Cmin/G' if bass note is valid.
+    Normalizes common shorthand to match your generator naming:
+    - m7/m9/m11 -> min7/min9/min11
+    - maj6 -> 6
+    - 6/9 -> 6add9
     """
-    if not ch:
-        return None
-
-    s = str(ch).strip()
+    s = (ch or "").strip()
     if not s:
-        return None
+        return ""
 
-    # Normalize unicode dashes and accidental symbols
-    s = s.replace("–", "-").replace("—", "-").replace("−", "-")
-    s = s.replace("♭", "b").replace("♯", "#")
-    s = s.replace(" ", "")
+    s = s.replace("6/9", "6add9")
+    s = s.replace("Maj", "maj").replace("Min", "min").replace("Sus", "sus")
 
-    bass = None
-    if "/" in s:
-        main, bass = s.split("/", 1)
-        main = main.strip()
-        bass = bass.strip()
-        if bass not in NOTE_TO_PC:
-            return None
-    else:
-        main = s
-
-    m = re.match(r"^([A-G](?:#|b)?)(.*)$", main)
+    m = re.match(r"^([A-G](?:#|b)?)(.*)$", s)
     if not m:
-        return None
+        return ""
 
     root = m.group(1)
-    rest = (m.group(2) or "").strip()
+    rest = m.group(2).strip().replace(" ", "")
+    rlow = rest.lower()
 
+    if rlow.startswith("maj6"):
+        rlow = "6" + rlow[len("maj6"):]
+    if rlow.startswith("m11"):
+        rlow = "min11" + rlow[len("m11"):]
+    if rlow.startswith("m9"):
+        rlow = "min9" + rlow[len("m9"):]
+    if rlow.startswith("m7"):
+        rlow = "min7" + rlow[len("m7"):]
+
+    return f"{root}{rlow}"
+
+def _split_progression_line(line: str) -> List[str]:
+    """
+    Allows: Cmin-Gmin-Fmin  OR  Cmin – Gmin – Fmin  OR  Cmin,Gmin,Fmin
+    """
+    if not line:
+        return []
+    parts = re.split(r"\s*(?:-+|–|,|\|)\s*", line.strip())
+    parts = [p.strip() for p in parts if p.strip()]
+    return parts
+
+def _banlist_token_is_valid(ch: str) -> bool:
+    """
+    Validate a chord token WITHOUT needing chord_to_midi() (keeps ordering in file safe).
+    Root must exist, quality must be one of QUAL_TO_INTERVALS keys.
+    """
+    m = re.match(r"^([A-G](?:#|b)?)(.*)$", ch.strip())
+    if not m:
+        return False
+    root = m.group(1)
+    qual = (m.group(2) or "").strip().replace(" ", "").lower()
     if root not in NOTE_TO_PC:
-        return None
+        return False
+    if qual not in QUAL_TO_INTERVALS:
+        return False
+    return True
 
-    q = rest.lower().replace("6/9", "6add9")
-
-    # Minor shorthand
-    if q in ("m", "-", "min", "minor"):
-        q = "min"
-    if q.startswith("m") and not q.startswith("maj"):
-        # m7 -> min7, m9 -> min9, m11 -> min11
-        q = q.replace("m", "min", 1)
-
-    # Major shorthand
-    if q in ("maj", "major"):
-        q = "maj"
-
-    # Bare root means maj
-    if q == "":
-        q = "maj"
-
-    if q not in QUAL_TO_INTERVALS:
-        return None
-
-    if bass:
-        return f"{root}{q}/{bass}"
-    return f"{root}{q}"
-
-
-def _ban_key_exact(chords: List[str]) -> Tuple[str, ...]:
-    return tuple(chords)
-
-
-def parse_banlist_txt(uploaded_file) -> Tuple[set, Dict[str, int]]:
+def load_banlist_from_txt_bytes(data: bytes) -> Tuple[set, int, int, int, List[str]]:
     """
-    Reads a .txt file where each line is a progression to ban (exact order).
-    Example line: Cmin-Gmin-Fmin
-    Returns (banned_set, stats).
+    Returns:
+      (ban_set, added, invalid, empty, invalid_examples)
+
+    ban_set stores progressions as tuple[str,...] in ORDER (start matters).
     """
-    banned = set()
-    stats = {"lines": 0, "added": 0, "skipped_empty": 0, "skipped_invalid": 0}
-
-    if uploaded_file is None:
-        return banned, stats
-
     try:
-        raw = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+        text = data.decode("utf-8", errors="ignore")
     except Exception:
-        try:
-            raw = uploaded_file.read().decode("utf-8", errors="ignore")
-        except Exception:
-            return banned, stats
+        text = str(data)
 
-    for line in raw.splitlines():
-        stats["lines"] += 1
-        s = line.strip()
-        if not s:
-            stats["skipped_empty"] += 1
+    ban_set = set()
+    added = 0
+    invalid = 0
+    empty = 0
+    invalid_examples = []
+
+    for raw in text.splitlines():
+        line = (raw or "").strip()
+        if not line:
+            empty += 1
             continue
 
-        # Remove comments (# or //)
-        s = re.split(r"(#|//)", s, maxsplit=1)[0].strip()
-        if not s:
-            stats["skipped_empty"] += 1
+        chords_raw = _split_progression_line(line)
+        chords = [_normalize_chord_token(c) for c in chords_raw]
+        chords = [c for c in chords if c]
+
+        if len(chords) < 2:
+            invalid += 1
+            if len(invalid_examples) < 8:
+                invalid_examples.append(raw)
             continue
 
-        # Tokenize by common separators: -, , | ; /
-        parts = re.split(r"\s*[-,|;]+\s*", s)
-        parts = [p.strip() for p in parts if p.strip()]
-        if len(parts) < 2:
-            stats["skipped_invalid"] += 1
-            continue
-
-        normalized = []
-        ok = True
-        for token in parts:
-            canon = _normalize_chord_token(token)
-            if canon is None:
-                ok = False
-                break
-            normalized.append(canon)
-
+        ok = all(_banlist_token_is_valid(ch) for ch in chords)
         if not ok:
-            stats["skipped_invalid"] += 1
+            invalid += 1
+            if len(invalid_examples) < 8:
+                invalid_examples.append(raw)
             continue
 
-        banned.add(_ban_key_exact(normalized))
-        stats["added"] += 1
+        key = tuple(chords)
+        if key not in ban_set:
+            ban_set.add(key)
+            added += 1
 
-    return banned, stats
+    return ban_set, added, invalid, empty, invalid_examples
+
+def progression_is_banned(chords: List[str], ban_set: set) -> bool:
+    """
+    ORDERED match (start matters).
+    """
+    if not ban_set or not chords:
+        return False
+    norm = tuple(_normalize_chord_token(c) for c in chords)
+    return norm in ban_set
 
 
 # =========================================================
@@ -742,7 +730,7 @@ def _pattern_fingerprint(degs, quals):
 # =========================================================
 # CHORD TYPE BALANCE (ADVANCED) + STRICT MODE
 # =========================================================
-STRICT_SLIDERS = True  # True = sliders act like hard rules
+STRICT_SLIDERS = True  # ✅ True = sliders act like hard rules
 
 ADV_ALL_QUALITIES = [
     "maj9","maj7","add9","6add9","6","maj",
@@ -803,9 +791,6 @@ def _pick_quality_diatonic(
     deg: int,
     deg_allowed: Dict[int, List[Tuple[str, float]]]
 ) -> Optional[str]:
-    """
-    Strict: ONLY pick from deg_allowed. If empty -> None (template invalid).
-    """
     pool = deg_allowed.get(deg, [])
     if not pool:
         return None
@@ -872,7 +857,7 @@ def _dedupe_inside_progression(rng: random.Random, key: str, degs: list, quals: 
     return degs, quals
 
 
-def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int, deg_allowed):
+def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int, deg_allowed, chord_balance):
     quals = []
     for d in degs:
         q = _pick_quality_diatonic(rng, key, d, deg_allowed=deg_allowed)
@@ -880,7 +865,7 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
             return None
         quals.append(q)
 
-    # RULE: Do not allow progression to start with SUS chord unless SUS sliders > 80
+    # Do not start with SUS unless SUS sliders are strongly boosted (>80)
     def is_sus(q: str) -> bool:
         return q.startswith("sus")
 
@@ -936,6 +921,7 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
     HEAVY_NEED = 2
     HEAVY_NEED_IF_SUS4 = 3
     HEAVY_REQUIRE_STEP_OR_REPEAT = True
+
     ALLOW_SUS4_TO_SUS4_IF_SAFE = True
 
     if not sus_heavy:
@@ -1027,13 +1013,10 @@ def generate_progressions(
     n: int,
     seed: int,
     chord_balance: Optional[Dict[str, int]] = None,
-    banned_progressions: Optional[set] = None
+    ban_set: Optional[set] = None,
 ):
     rng = random.Random(seed)
     keys = _pick_keys_even(n, rng)
-    deg_allowed = None
-
-    banned_progressions = banned_progressions or set()
 
     max_pattern_dupes = int(math.floor(n * MAX_PATTERN_DUPLICATE_RATIO))
     pattern_dupe_used = 0
@@ -1044,6 +1027,7 @@ def generate_progressions(
     qual_usage = Counter()
 
     out = []
+    ban_set = ban_set or set()
 
     for i in range(n):
         key = keys[i]
@@ -1054,14 +1038,21 @@ def generate_progressions(
             total_bars, m = _pick_valid_total_and_m(rng)
             degs = _pick_template_degs(rng, m)
 
-            res = _build_progression(rng, key, degs, total_bars, deg_allowed=deg_allowed)
+            res = _build_progression(
+                rng,
+                key,
+                degs,
+                total_bars,
+                deg_allowed=deg_allowed,
+                chord_balance=chord_balance
+            )
             if res is None:
                 continue
 
             chords, durs, _k, degs_used, quals_used = res
 
-            # Banlist check (EXACT order)
-            if _ban_key_exact(list(chords)) in banned_progressions:
+            # BANLIST check (ordered, start matters)
+            if ban_set and progression_is_banned(chords, ban_set):
                 continue
 
             ek = tuple(chords)
@@ -1098,28 +1089,38 @@ def generate_progressions(
 # =========================================================
 NOTE_TO_SEMITONE = NOTE_TO_PC.copy()
 
+# Range
 LOW, HIGH = 48, 84
+
+# Register target
 TARGET_CENTER = 60.0
 
+# Span targets (overall chord spread)
 IDEAL_SPAN = 12
 MIN_SPAN = 8
 MAX_SPAN = 19
 
+# Adjacent spacing rules (inside the chord)
 MIN_ADJ_GAP = 2
 MAX_ADJ_GAP = 9
 HARD_MAX_ADJ_GAP = 12
 
+# Bass stability
 MAX_BASS_JUMP = 7
 
+# Shared tones safety
 MAX_SHARED_DEFAULT = 2
 MAX_SHARED_MIN11 = 3
 
+# Raw-shape handling
 ENFORCE_NOT_RAW_WHEN_VOICING = True
 RAW_PENALTY = 1800
 
+# Glue behavior (semitone clusters)
 GLUE_LOW_CUTOFF = 48
 GLUE_PROBABILITY = 0.30
 
+# Resolution allowed for cross-semitone repair
 ALLOW_RESOLVE_TO_THIRD = True
 ALLOW_RESOLVE_TO_FIFTH = False
 
@@ -1706,24 +1707,25 @@ with sp_center:
         help="Repositions the notes within each chord for smoother movement and a more original sound.",
     )
 
-    # NEW: BANLIST UPLOADER
-    with st.expander("BANLIST (optional)", expanded=False):
+    # =========================================================
+    # BANLIST (OPTIONAL)
+    # =========================================================
+    with st.expander("BANLIST (OPTIONAL)", expanded=False):
         st.caption("Upload a .txt with progressions to exclude (one per line). Example: Cmin-Gmin-Fmin")
-        ban_file = st.file_uploader(
-            "Upload banlist .txt",
-            type=["txt"],
-            accept_multiple_files=False,
-        )
 
-        banned_set, ban_stats = parse_banlist_txt(ban_file)
-        st.session_state["aa_banned_set"] = banned_set
+        up = st.file_uploader("Upload banlist .txt", type=["txt"], label_visibility="visible")
+        if up is not None:
+            ban_set, added, invalid, empty, examples = load_banlist_from_txt_bytes(up.getvalue())
+            st.session_state[BAN_KEY] = ban_set
 
-        if ban_file is not None:
-            st.info(
-                f"Banlist loaded. Added: {ban_stats['added']} | Invalid lines: {ban_stats['skipped_invalid']} | Empty: {ban_stats['skipped_empty']}"
-            )
+            st.info(f"Banlist loaded. Added: {added} | Invalid lines: {invalid} | Empty: {empty}")
+            if examples:
+                st.caption("Examples of invalid lines (first few):")
+                for ex in examples[:6]:
+                    st.code(ex)
         else:
-            st.session_state["aa_banned_set"] = set()
+            st.session_state.setdefault(BAN_KEY, set())
+            st.caption("No banlist uploaded.")
 
     # ADVANCED SETTINGS UI (single render, no duplicates)
     if ENABLE_CHORD_BALANCE_FEATURE and ENABLE_CHORD_TYPE_SLIDERS:
@@ -1774,13 +1776,13 @@ if generate_clicked:
                 seed = int(np.random.randint(1, 2_000_000_000))
 
             chord_balance = read_adv_balance() if ENABLE_CHORD_BALANCE_FEATURE else None
-            banned_set = st.session_state.get("aa_banned_set", set())
+            ban_set = st.session_state.get(BAN_KEY, set())
 
             progressions, pattern_dupe_used, pattern_dupe_max, low_sim_total, qual_usage = generate_progressions(
                 n=int(n_progressions),
                 seed=seed,
                 chord_balance=chord_balance,
-                banned_progressions=banned_set,
+                ban_set=ban_set,
             )
 
             if low_sim_total != 0:
@@ -1838,6 +1840,7 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
 
     st.markdown("### Progressions List")
     st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 
 
