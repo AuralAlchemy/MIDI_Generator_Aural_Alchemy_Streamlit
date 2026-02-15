@@ -7,6 +7,7 @@
 # - Sacred geometry overlay (two layers + slow rotation)
 # - ADVANCED: Chord Type Balance sliders (optional, can be disabled via flag)
 # - ADVANCED: Reset sliders to default (50)
+# - ADVANCED: Voicing Profile selector (Default / Tight / Wide / Deep Low Ambient)
 # - BANLIST: Upload a .txt with progressions to exclude (ordered match, start matters)
 # - ZIP name: adds "_Revoiced" when re-voicing is enabled
 
@@ -16,7 +17,6 @@ import math
 import random
 import tempfile
 import base64
-import hashlib
 from zipfile import ZipFile
 from collections import Counter
 from typing import List, Optional, Dict, Tuple
@@ -30,8 +30,8 @@ import pretty_midi
 # =========================================================
 # FEATURE FLAGS (DEV ONLY)
 # =========================================================
-# Master toggle: disables chord-balance feature entirely (no UI + no weighting).
 ENABLE_CHORD_BALANCE_FEATURE = True
+ENABLE_CHORD_TYPE_SLIDERS = True
 
 
 # =========================================================
@@ -393,10 +393,9 @@ GEOM_SVG = """
 </svg>
 """
 
-# Second layer SVG WITHOUT triangle
 GEOM_SVG_NO_TRIANGLE = GEOM_SVG.replace(
     '<polygon points="600,220 929.1,790 270.9,790" opacity="0.90"/>',
-    ""
+    ''
 )
 
 GEOM_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(GEOM_SVG.encode("utf-8")).decode("utf-8")
@@ -512,7 +511,6 @@ BANLIST_STATE_KEY = "aa_banlist_v1"
 
 
 def _norm_dash(s: str) -> str:
-    # Normalize different dash chars to "-"
     return (s or "").replace("–", "-").replace("—", "-").replace("−", "-")
 
 
@@ -542,9 +540,7 @@ def _normalize_chord_token(tok: str) -> str:
     t = (tok or "").strip()
     if not t:
         return ""
-
-    t = _norm_dash(t)
-    t = t.replace(" ", "")
+    t = _norm_dash(t).replace(" ", "")
     t = t.replace("6/9", "6add9").replace("6\\9", "6add9")
     t = re.sub(r"[,\.;]+$", "", t)
 
@@ -569,7 +565,6 @@ def _is_meta_line(line: str) -> bool:
     s = (line or "").strip()
     if not s:
         return False
-
     s_up = s.upper()
 
     if re.match(r"^PACK\s*\d+\s*$", s_up) or s_up.startswith("PACK"):
@@ -601,12 +596,6 @@ def _split_chord_tokens(prog_text: str) -> List[str]:
 
 
 def load_banlist_from_txt_bytes(data: bytes) -> Tuple[set, Dict[str, int], List[str]]:
-    """
-    Returns:
-      (banned_set, stats_dict, bad_examples)
-
-    banned_set stores progressions as tuple[str,...] in ORDER (start matters).
-    """
     try:
         text = data.decode("utf-8", errors="ignore")
     except Exception:
@@ -650,9 +639,6 @@ def load_banlist_from_txt_bytes(data: bytes) -> Tuple[set, Dict[str, int], List[
 
 
 def progression_is_banned(chords: List[str], banned_set: set) -> bool:
-    """
-    ORDERED match (start matters).
-    """
     if not banned_set or not chords:
         return False
     norm = tuple(_normalize_chord_token(c) for c in chords)
@@ -663,7 +649,7 @@ def progression_is_banned(chords: List[str], banned_set: set) -> bool:
 # GENERATOR SETTINGS
 # =========================================================
 PATTERN_MAX_REPEATS = 1
-MAX_PATTERN_DUPLICATE_RATIO = 0.01  # 1%
+MAX_PATTERN_DUPLICATE_RATIO = 0.01
 
 TOTAL_BARS_DISTRIBUTION = {8: 0.40, 4: 0.35, 16: 0.25}
 CHORDCOUNT_DISTRIBUTION = {4: 0.40, 3: 0.35, 2: 0.20, 5: 0.03, 6: 0.02}
@@ -675,22 +661,10 @@ MIN_SHARED_TONES = 1
 ENFORCE_LOOP_OK = True
 MAX_TRIES_PER_PROG = 40000
 
-TRIAD_PROB_BASE = 0.0
-BARE_SUS_PROB = 0.0
-
-SUS_WEIGHT_MULT = 1
-SUS_UPGRADE_PROB = 0
-
-MAJ_POOL_BASE = [("maj9", 10), ("maj7", 9), ("add9", 7), ("6add9", 5), ("6", 4), ("maj", 3)]
-MIN_POOL_BASE = [("min9", 10), ("min7", 9), ("min11", 4), ("min", 3)]
-SUS_POOL_BASE = [("sus2add9", 1), ("sus4add9", 1), ("sus2", 2), ("sus4", 2)]
-
-
-def _scaled_pool(pool, mult):
-    return [(q, max(1e-9, w * mult)) for q, w in pool]
-
-
-SUS_POOL_SCALED_BASE = _scaled_pool(SUS_POOL_BASE, SUS_WEIGHT_MULT)
+# Pools (main control for maj/min/sus flavor)
+MAJ_POOL_BASE = [("maj9", 10), ("maj7", 9), ("add9", 7), ("6add9", 5), ("6", 4), ("maj", 4)]
+MIN_POOL_BASE = [("min9", 10), ("min7", 9), ("min11", 4), ("min", 4)]
+SUS_POOL_BASE = [("sus2add9", 3), ("sus4add9", 3), ("sus2", 3), ("sus4", 3)]
 
 SAFE_FALLBACK_ORDER = [
     "maj9", "maj7", "add9", "6add9", "6",
@@ -700,19 +674,19 @@ SAFE_FALLBACK_ORDER = [
 ]
 
 TEMPLATES_BY_LEN = {
-    2: [((0,3), 10), ((0,5), 7), ((5,3), 5), ((3,0), 4), ((0,4), 3)],
+    2: [((0, 3), 10), ((0, 5), 7), ((5, 3), 5), ((3, 0), 4), ((0, 4), 3)],
     3: [
-        ((0,5,3), 14), ((0,3,4), 12), ((0,3,5), 10), ((0,5,4), 9),
-        ((0,2,3), 7), ((0,2,5), 6), ((3,5,0), 5), ((5,3,0), 5),
-        ((0,1,3), 3), ((0,6,3), 2),
+        ((0, 5, 3), 14), ((0, 3, 4), 12), ((0, 3, 5), 10), ((0, 5, 4), 9),
+        ((0, 2, 3), 7), ((0, 2, 5), 6), ((3, 5, 0), 5), ((5, 3, 0), 5),
+        ((0, 1, 3), 3), ((0, 6, 3), 2),
     ],
     4: [
-        ((0,5,3,4), 18), ((0,5,3,0), 12), ((0,3,4,3), 12), ((0,3,5,3), 12),
-        ((0,2,5,3), 10), ((0,2,3,4), 10), ((0,1,3,4), 6), ((0,1,3,0), 5),
-        ((5,3,4,0), 5), ((3,4,0,5), 4), ((0,4,3,5), 4),
+        ((0, 5, 3, 4), 18), ((0, 5, 3, 0), 12), ((0, 3, 4, 3), 12), ((0, 3, 5, 3), 12),
+        ((0, 2, 5, 3), 10), ((0, 2, 3, 4), 10), ((0, 1, 3, 4), 6), ((0, 1, 3, 0), 5),
+        ((5, 3, 4, 0), 5), ((3, 4, 0, 5), 4), ((0, 4, 3, 5), 4),
     ],
-    5: [((0,5,3,4,3), 4), ((0,3,0,5,3), 3), ((0,2,3,4,3), 3)],
-    6: [((0,5,3,4,3,0), 3), ((0,3,0,5,3,0), 3)],
+    5: [((0, 5, 3, 4, 3), 4), ((0, 3, 0, 5, 3), 3), ((0, 2, 3, 4, 3), 3)],
+    6: [((0, 5, 3, 4, 3, 0), 3), ((0, 3, 0, 5, 3, 0), 3)],
 }
 
 
@@ -721,21 +695,21 @@ def _pick_template_degs(rng: random.Random, m: int) -> list:
 
 
 DURATIONS = {
-    (2, 4):  [([2,2], 10)],
-    (3, 4):  [([2,1,1], 10), ([1,1,2], 8)],
-    (4, 4):  [([1,1,1,1], 12)],
+    (2, 4): [([2, 2], 10)],
+    (3, 4): [([2, 1, 1], 10), ([1, 1, 2], 8)],
+    (4, 4): [([1, 1, 1, 1], 12)],
 
-    (2, 8):  [([4,4], 12)],
-    (3, 8):  [([4,2,2], 10), ([2,2,4], 9), ([2,4,2], 2), ([3,3,2], 1)],
-    (4, 8):  [([2,2,2,2], 12), ([4,2,1,1], 1), ([2,1,1,4], 1), ([1,1,2,4], 0), ([4,1,1,2], 1)],
-    (5, 8):  [([2,2,2,1,1], 3), ([1,2,2,2,1], 1), ([2,1,2,1,2], 7), ([2,2,1,2,1], 3)],
-    (6, 8):  [([2,1,1,2,1,1], 5), ([1,1,1,1,2,2], 1), ([1,1,2,1,1,2], 4), ([2,1,2,1,1,1], 3)],
+    (2, 8): [([4, 4], 12)],
+    (3, 8): [([4, 2, 2], 10), ([2, 2, 4], 9), ([2, 4, 2], 2), ([3, 3, 2], 1)],
+    (4, 8): [([2, 2, 2, 2], 12), ([4, 2, 1, 1], 1), ([2, 1, 1, 4], 1), ([1, 1, 2, 4], 0), ([4, 1, 1, 2], 1)],
+    (5, 8): [([2, 2, 2, 1, 1], 3), ([1, 2, 2, 2, 1], 1), ([2, 1, 2, 1, 2], 7), ([2, 2, 1, 2, 1], 3)],
+    (6, 8): [([2, 1, 1, 2, 1, 1], 5), ([1, 1, 1, 1, 2, 2], 1), ([1, 1, 2, 1, 1, 2], 4), ([2, 1, 2, 1, 1, 1], 3)],
 
-    (2,16):  [([8,8], 8)],
-    (3,16):  [([8,4,4], 4), ([4,4,8], 3), ([6,6,4], 3)],
-    (4,16):  [([4,4,4,4], 12), ([6,4,4,2], 4)],
-    (5,16):  [([4,4,4,2,2], 3), ([2,2,4,4,4], 3), ([4,2,4,2,4], 7), ([2,4,4,4,2], 3)],
-    (6,16):  [([4,2,2,4,2,2], 5), ([4,2,2,2,2,4], 4), ([2,4,2,4,2,2], 5)],
+    (2, 16): [([8, 8], 8)],
+    (3, 16): [([8, 4, 4], 4), ([4, 4, 8], 3), ([6, 6, 4], 3)],
+    (4, 16): [([4, 4, 4, 4], 12), ([6, 4, 4, 2], 4)],
+    (5, 16): [([4, 4, 4, 2, 2], 3), ([2, 2, 4, 4, 4], 3), ([4, 2, 4, 2, 4], 7), ([2, 4, 4, 4, 2], 3)],
+    (6, 16): [([4, 2, 2, 4, 2, 2], 5), ([4, 2, 2, 2, 2, 4], 4), ([2, 4, 2, 4, 2, 2], 5)],
 }
 VALID_COMBOS = sorted(list(DURATIONS.keys()))
 
@@ -763,15 +737,15 @@ def _pattern_fingerprint(degs, quals):
 # =========================================================
 # CHORD TYPE BALANCE (ADVANCED) + STRICT MODE
 # =========================================================
-STRICT_SLIDERS = True  # True = sliders act like hard rules
+STRICT_SLIDERS = True
 
 ADV_ALL_QUALITIES = [
-    "maj9","maj7","add9","6add9","6","maj",
-    "min9","min7","min11","min",
-    "sus2add9","sus4add9","sus2","sus4",
+    "maj9", "maj7", "add9", "6add9", "6", "maj",
+    "min9", "min7", "min11", "min",
+    "sus2add9", "sus4add9", "sus2", "sus4",
 ]
 ADV_DEFAULT_VALUE = 50
-ADV_KEY_PREFIX = "aa_adv_v1_"  # bump this if you ever change the widget set
+ADV_KEY_PREFIX = "aa_adv_v1_"
 
 
 def _balance_factor(v: int) -> float:
@@ -792,10 +766,6 @@ def _enabled_qualities(balance: Optional[Dict[str, int]]) -> List[str]:
 
 
 def _build_deg_allowed(balance: Optional[Dict[str, int]], key: str) -> Dict[int, List[Tuple[str, float]]]:
-    """
-    Returns per-degree pools for THIS key: deg -> [(quality, weight), ...]
-    Strict mode: ONLY enabled qualities, diatonic-filtered, no silent fallback.
-    """
     enabled = _enabled_qualities(balance)
 
     if STRICT_SLIDERS and balance and len(enabled) == 0:
@@ -898,7 +868,6 @@ def _build_progression(rng: random.Random, key: str, degs: list, total_bars: int
             return None
         quals.append(q)
 
-    # Do not start with SUS unless SUS sliders are strongly boosted (>80)
     def is_sus(q: str) -> bool:
         return q.startswith("sus")
 
@@ -1117,99 +1086,132 @@ def generate_progressions(
 
 
 # =========================================================
-# CHORD -> MIDI + VOICING ENGINE (SMOOTH PRO VERSION)
+# EDIT FRIENDLY "ONE PLACE" FOR OCTAVE / RANGE / VOICING
 # =========================================================
-NOTE_TO_SEMITONE = NOTE_TO_PC.copy()
+# MIDI note reference:
+# C2=36, E2=40, C3=48, E3=52, C4=60
+VOICING_PROFILE_KEY = "aa_voicing_profile_v1"
 
-# Range
-LOW, HIGH = 48, 84
+VOICING_PROFILES = {
+    # You can change these numbers anytime.
+    "Default": {
+        "global_low": 33,      # allow deep lows in engine; penalties keep it safe
+        "global_high": 84,
 
-# Register target
-TARGET_CENTER = 60.0
+        "bass_soft_min": 40,   # preferred bass zone (E2)
+        "bass_soft_max": 52,   # (E3)
+        "bass_hard_min": 36,   # hard floor (C2)
+        "bass_hard_max": 55,   # hard ceiling (G3-ish)
+        "bass_center": 46,     # gravity center for bass (Bb2)
+        "max_bass_jump": 7,    # semitones
 
-# Span targets (overall chord spread)
-IDEAL_SPAN = 12
-MIN_SPAN = 8
-MAX_SPAN = 19
+        "target_center": 60.0, # chord register center (C4)
+        "ideal_span": 12,
+        "min_span": 8,
+        "max_span": 18,
 
-# Adjacent spacing rules (inside the chord)
-MIN_ADJ_GAP = 2
-MAX_ADJ_GAP = 9
-HARD_MAX_ADJ_GAP = 12
+        "min_adj_gap": 2,
+        "max_adj_gap": 9,
+        "hard_max_adj_gap": 12,
 
-# Bass stability
-MAX_BASS_JUMP = 7
-
-# Shared tones safety
-MAX_SHARED_DEFAULT = 2
-MAX_SHARED_MIN11 = 3
-
-# Raw-shape handling
-ENFORCE_NOT_RAW_WHEN_VOICING = True
-RAW_PENALTY = 1800
-
-# Glue behavior (semitone clusters)
-GLUE_LOW_CUTOFF = 48
-GLUE_PROBABILITY = 0.30
-
-# Resolution allowed for cross-semitone repair
-ALLOW_RESOLVE_TO_THIRD = True
-ALLOW_RESOLVE_TO_FIFTH = False
-
-
-# =========================================================
-# RE-VOICING STYLE PRESETS (safe, controlled)
-# =========================================================
-# Presets only adjust register + span targets. All safety penalties remain.
-VOICING_PRESETS = {
-    "Balanced (Default)": {
-        "TARGET_CENTER": 60.0,
-        "IDEAL_SPAN": 12,
-        "MIN_SPAN": 8,
-        "MAX_SPAN": 19,
-        "MIN_ADJ_GAP": 2,
-        "MAX_ADJ_GAP": 9,
-        "HARD_MAX_ADJ_GAP": 12,
+        "max_register_jump": 7,  # whole-chord center jump between chords (semitones)
     },
-    "Tight (Intimate)": {
-        "TARGET_CENTER": 60.0,
-        "IDEAL_SPAN": 10,
-        "MIN_SPAN": 7,
-        "MAX_SPAN": 16,
-        "MIN_ADJ_GAP": 2,
-        "MAX_ADJ_GAP": 8,
-        "HARD_MAX_ADJ_GAP": 11,
+    "Tight": {
+        "global_low": 33,
+        "global_high": 84,
+
+        "bass_soft_min": 41,
+        "bass_soft_max": 52,
+        "bass_hard_min": 38,
+        "bass_hard_max": 55,
+        "bass_center": 47,
+        "max_bass_jump": 6,
+
+        "target_center": 60.0,
+        "ideal_span": 9,
+        "min_span": 7,
+        "max_span": 14,
+
+        "min_adj_gap": 2,
+        "max_adj_gap": 7,
+        "hard_max_adj_gap": 10,
+
+        "max_register_jump": 6,
     },
-    "Wide (Cinematic)": {
-        "TARGET_CENTER": 62.0,
-        "IDEAL_SPAN": 15,
-        "MIN_SPAN": 10,
-        "MAX_SPAN": 23,
-        "MIN_ADJ_GAP": 2,
-        "MAX_ADJ_GAP": 10,
-        "HARD_MAX_ADJ_GAP": 13,
+    "Wide": {
+        "global_low": 33,
+        "global_high": 84,
+
+        "bass_soft_min": 40,
+        "bass_soft_max": 52,
+        "bass_hard_min": 36,
+        "bass_hard_max": 55,
+        "bass_center": 46,
+        "max_bass_jump": 7,
+
+        "target_center": 62.0,
+        "ideal_span": 16,
+        "min_span": 10,
+        "max_span": 22,
+
+        "min_adj_gap": 2,
+        "max_adj_gap": 11,
+        "hard_max_adj_gap": 14,
+
+        "max_register_jump": 8,
+    },
+    "Deep Low Ambient": {
+        "global_low": 33,
+        "global_high": 84,
+
+        "bass_soft_min": 36,  # C2
+        "bass_soft_max": 48,  # C3
+        "bass_hard_min": 33,  # A1-ish rare
+        "bass_hard_max": 52,  # E3
+        "bass_center": 42,    # F#2
+        "max_bass_jump": 5,
+
+        "target_center": 58.0,
+        "ideal_span": 12,
+        "min_span": 8,
+        "max_span": 18,
+
+        "min_adj_gap": 2,
+        "max_adj_gap": 9,
+        "hard_max_adj_gap": 12,
+
+        "max_register_jump": 6,
     },
 }
 
 
-def apply_voicing_preset(preset_name: str):
-    """
-    Applies a preset by updating the global voicing targets.
-    Called only during export when re-voicing is enabled.
-    """
-    global TARGET_CENTER, IDEAL_SPAN, MIN_SPAN, MAX_SPAN
-    global MIN_ADJ_GAP, MAX_ADJ_GAP, HARD_MAX_ADJ_GAP
+def get_voicing_profile_name() -> str:
+    name = st.session_state.get(VOICING_PROFILE_KEY, "Default")
+    return name if name in VOICING_PROFILES else "Default"
 
-    p = VOICING_PRESETS.get(preset_name) or VOICING_PRESETS["Balanced (Default)"]
 
-    TARGET_CENTER = float(p["TARGET_CENTER"])
-    IDEAL_SPAN = int(p["IDEAL_SPAN"])
-    MIN_SPAN = int(p["MIN_SPAN"])
-    MAX_SPAN = int(p["MAX_SPAN"])
+def get_voicing_profile() -> dict:
+    return VOICING_PROFILES[get_voicing_profile_name()]
 
-    MIN_ADJ_GAP = int(p["MIN_ADJ_GAP"])
-    MAX_ADJ_GAP = int(p["MAX_ADJ_GAP"])
-    HARD_MAX_ADJ_GAP = int(p["HARD_MAX_ADJ_GAP"])
+
+# =========================================================
+# CHORD -> MIDI + VOICING ENGINE (PROFILE-DRIVEN, SAFE)
+# =========================================================
+NOTE_TO_SEMITONE = NOTE_TO_PC.copy()
+
+BPM = 85
+TIME_SIG = (4, 4)
+BASE_OCTAVE = 3
+VELOCITY = 100
+
+BAR_DIR = {4: "4-bar", 8: "8-bar", 16: "16-bar"}
+
+
+def sec_per_bar(bpm=BPM, ts=TIME_SIG):
+    return (60.0 / bpm) * ts[0]
+
+
+SEC_PER_BAR = sec_per_bar()
 
 
 def parse_root_and_bass(ch: str):
@@ -1230,7 +1232,34 @@ def parse_root_and_bass(ch: str):
     return root, rest, bass
 
 
-def chord_to_midi(chord_name: str, base_oct=3, low=LOW, high=HIGH) -> List[int]:
+def clamp_to_range(notes: List[int], low: int, high: int) -> List[int]:
+    out = []
+    for p in notes:
+        while p < low:
+            p += 12
+        while p > high:
+            p -= 12
+        out.append(int(p))
+    return sorted(out)
+
+
+def span(notes: List[int]) -> int:
+    if not notes:
+        return 0
+    return int(max(notes) - min(notes))
+
+
+def center(notes: List[int]) -> float:
+    if not notes:
+        return 60.0
+    return (min(notes) + max(notes)) / 2.0
+
+
+def chord_to_midi(chord_name: str) -> List[int]:
+    prof = get_voicing_profile()
+    low = int(prof["global_low"])
+    high = int(prof["global_high"])
+
     root, rest, bass = parse_root_and_bass(chord_name)
     if root not in NOTE_TO_SEMITONE:
         raise ValueError(f"Bad root '{root}' in '{chord_name}'")
@@ -1240,7 +1269,16 @@ def chord_to_midi(chord_name: str, base_oct=3, low=LOW, high=HIGH) -> List[int]:
         raise ValueError(f"Unrecognized chord quality: {rest}")
 
     root_pc = NOTE_TO_SEMITONE[root]
-    root_midi = 12 * (base_oct + 1) + root_pc
+
+    # Anchor root near bass_center for consistent RAW register
+    root_midi = 12 * 3 + root_pc  # around C2/C3 region
+
+    # Pull into a window around bass_center
+    bc = int(prof["bass_center"])
+    while root_midi < bc - 6:
+        root_midi += 12
+    while root_midi > bc + 6:
+        root_midi -= 12
 
     tones = QUAL_TO_INTERVALS[quality]
     notes = []
@@ -1256,35 +1294,14 @@ def chord_to_midi(chord_name: str, base_oct=3, low=LOW, high=HIGH) -> List[int]:
         if bass not in NOTE_TO_SEMITONE:
             raise ValueError(f"Bad slash bass '{bass}' in '{chord_name}'")
         bass_pc = NOTE_TO_SEMITONE[bass]
-        bass_midi = 12 * base_oct + bass_pc
-        while notes and bass_midi > min(notes):
+        # Place slash bass under chord, then clamp
+        bass_midi = 12 * 3 + bass_pc
+        while bass_midi > min(notes):
             bass_midi -= 12
         notes = [bass_midi] + notes
 
+    notes = clamp_to_range(notes, low, high)
     return sorted(set(int(x) for x in notes))
-
-
-def clamp_to_range(notes: List[int]) -> List[int]:
-    out = []
-    for p in notes:
-        while p < LOW:
-            p += 12
-        while p > HIGH:
-            p -= 12
-        out.append(int(p))
-    return sorted(out)
-
-
-def span(notes: List[int]) -> int:
-    if not notes:
-        return 0
-    return int(max(notes) - min(notes))
-
-
-def center(notes: List[int]) -> float:
-    if not notes:
-        return TARGET_CENTER
-    return (min(notes) + max(notes)) / 2.0
 
 
 def semitone_pairs(notes: List[int]):
@@ -1296,15 +1313,18 @@ def semitone_pairs(notes: List[int]):
     return pairs
 
 
+# Glue behavior (semitone clusters)
+GLUE_LOW_CUTOFF = 48
+GLUE_PROBABILITY = 0.30
+
+
 def glue_ok(notes: List[int], rng: random.Random) -> bool:
     pairs = semitone_pairs(notes)
     if not pairs:
         return True
-
     for a, b in pairs:
         if a < GLUE_LOW_CUTOFF or b < GLUE_LOW_CUTOFF:
             return False
-
     return rng.random() < GLUE_PROBABILITY
 
 
@@ -1317,12 +1337,24 @@ def is_min11_name(ch_name: str) -> bool:
     return ("min11" in s)
 
 
+MAX_SHARED_DEFAULT = 2
+MAX_SHARED_MIN11 = 3
+
+
 def max_shared_allowed(prev_name: str, cur_name: str) -> int:
     return MAX_SHARED_MIN11 if (is_min11_name(prev_name) or is_min11_name(cur_name)) else MAX_SHARED_DEFAULT
 
 
-def is_raw_shape(v: List[int], raw_notes: List[int]) -> bool:
-    return sorted(v) == sorted(clamp_to_range(raw_notes))
+ENFORCE_NOT_RAW_WHEN_VOICING = True
+RAW_PENALTY = 1800
+
+
+def is_raw_shape(v: List[int], raw_notes: List[int], low: int, high: int) -> bool:
+    return sorted(v) == sorted(clamp_to_range(raw_notes, low, high))
+
+
+ALLOW_RESOLVE_TO_THIRD = True
+ALLOW_RESOLVE_TO_FIFTH = False
 
 
 def allowed_resolution_pcs(key: str) -> set:
@@ -1351,7 +1383,7 @@ def bad_cross_semitone_indices(prev_notes: List[int], cur_notes: List[int], allo
     return bad
 
 
-def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set, max_iters: int = 8) -> List[int]:
+def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set, low: int, high: int, max_iters: int = 8) -> List[int]:
     v = sorted(list(cur_notes))
 
     for _ in range(max_iters):
@@ -1366,7 +1398,7 @@ def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_
 
             for delta in (+12, -12):
                 n2 = n + delta
-                if n2 < LOW or n2 > HIGH:
+                if n2 < low or n2 > high:
                     continue
                 if n2 in v:
                     continue
@@ -1376,7 +1408,7 @@ def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_
                 test = sorted(test)
 
                 remaining = len(bad_cross_semitone_indices(prev_notes, test, allowed_target_pcs))
-                options.append((remaining, abs(center(test) - TARGET_CENTER), span(test), test))
+                options.append((remaining, abs(center(test) - center(v)), span(test), test))
 
             if options:
                 options.sort(key=lambda x: (x[0], x[1], x[2]))
@@ -1396,31 +1428,47 @@ def adjacent_gaps(notes: List[int]) -> List[int]:
     return [v[i + 1] - v[i] for i in range(len(v) - 1)]
 
 
-def spacing_penalty(notes: List[int]) -> float:
+def spacing_penalty(notes: List[int], prof: dict) -> float:
     gaps = adjacent_gaps(notes)
     if not gaps:
         return 0.0
 
     pen = 0.0
     for g in gaps:
-        if g < MIN_ADJ_GAP:
-            pen += (MIN_ADJ_GAP - g) * 900.0
-        if g > MAX_ADJ_GAP:
-            pen += (g - MAX_ADJ_GAP) * 420.0
-        if g > HARD_MAX_ADJ_GAP:
-            pen += (g - HARD_MAX_ADJ_GAP) * 1200.0
+        if g < prof["min_adj_gap"]:
+            pen += (prof["min_adj_gap"] - g) * 900.0
+        if g > prof["max_adj_gap"]:
+            pen += (g - prof["max_adj_gap"]) * 420.0
+        if g > prof["hard_max_adj_gap"]:
+            pen += (g - prof["hard_max_adj_gap"]) * 1200.0
     return pen
 
 
-def bass_penalty(prev: Optional[List[int]], cur: List[int]) -> float:
-    if prev is None or not prev:
+def bass_penalty(prev: Optional[List[int]], cur: List[int], prof: dict) -> float:
+    if not cur:
         return 0.0
-    b0 = min(prev)
-    b1 = min(cur)
-    jump = abs(b1 - b0)
-    if jump <= MAX_BASS_JUMP:
-        return 0.0
-    return (jump - MAX_BASS_JUMP) * 260.0
+
+    b = min(cur)
+    pen = 0.0
+
+    if b < prof["bass_hard_min"]:
+        pen += (prof["bass_hard_min"] - b) * 700.0
+    if b > prof["bass_hard_max"]:
+        pen += (b - prof["bass_hard_max"]) * 700.0
+
+    if b < prof["bass_soft_min"]:
+        pen += (prof["bass_soft_min"] - b) * 140.0
+    if b > prof["bass_soft_max"]:
+        pen += (b - prof["bass_soft_max"]) * 140.0
+
+    pen += abs(b - prof["bass_center"]) * 5.0
+
+    if prev:
+        jump = abs(min(prev) - b)
+        if jump > prof["max_bass_jump"]:
+            pen += (jump - prof["max_bass_jump"]) * 360.0
+
+    return pen
 
 
 def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
@@ -1446,8 +1494,8 @@ def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
     return float(best if best is not None else 0.0)
 
 
-def generate_voicing_candidates(raw_notes: List[int]) -> List[List[int]]:
-    base = sorted(set(clamp_to_range(raw_notes)))
+def generate_voicing_candidates(raw_notes: List[int], low: int, high: int) -> List[List[int]]:
+    base = sorted(set(clamp_to_range(raw_notes, low, high)))
     n = len(base)
     if n == 0:
         return []
@@ -1455,7 +1503,7 @@ def generate_voicing_candidates(raw_notes: List[int]) -> List[List[int]]:
     candidates = set()
 
     def add_candidate(v):
-        v = sorted(set(clamp_to_range(v)))
+        v = sorted(set(clamp_to_range(v, low, high)))
         if len(v) == n:
             candidates.add(tuple(v))
 
@@ -1492,8 +1540,13 @@ def choose_best_voicing(
     key_name: str,
     rng: random.Random
 ) -> List[int]:
-    raw_clamped = clamp_to_range(raw_notes)
-    cands = generate_voicing_candidates(raw_notes)
+    prof = get_voicing_profile()
+    low = int(prof["global_low"])
+    high = int(prof["global_high"])
+
+    raw_clamped = clamp_to_range(raw_notes, low, high)
+
+    cands = generate_voicing_candidates(raw_notes, low, high)
 
     filtered = [v for v in cands if glue_ok(v, rng)]
     if filtered:
@@ -1501,7 +1554,7 @@ def choose_best_voicing(
 
     if prev_voicing is not None:
         allowed_pcs = allowed_resolution_pcs(key_name)
-        cands = [repair_cross_semitones(prev_voicing, v, allowed_pcs) for v in cands]
+        cands = [repair_cross_semitones(prev_voicing, v, allowed_pcs, low, high) for v in cands]
 
     filtered = [v for v in cands if glue_ok(v, rng)]
     if filtered:
@@ -1516,25 +1569,25 @@ def choose_best_voicing(
     def cost(v: List[int]) -> float:
         v = sorted(v)
 
-        reg_pen = abs(center(v) - TARGET_CENTER) * 120.0
+        reg_pen = abs(center(v) - prof["target_center"]) * 120.0
 
         sp = span(v)
-        span_pen = abs(sp - IDEAL_SPAN) * 80.0
-        if sp < MIN_SPAN:
-            span_pen += (MIN_SPAN - sp) * 700.0
-        if sp > MAX_SPAN:
-            span_pen += (sp - MAX_SPAN) * 220.0
+        span_pen = abs(sp - prof["ideal_span"]) * 80.0
+        if sp < prof["min_span"]:
+            span_pen += (prof["min_span"] - sp) * 700.0
+        if sp > prof["max_span"]:
+            span_pen += (sp - prof["max_span"]) * 220.0
 
-        space_pen = spacing_penalty(v)
+        space_pen = spacing_penalty(v, prof)
 
         move_pen = 0.0 if prev_voicing is None else _min_assignment_move(prev_voicing, v) * 3.2
 
-        b_pen = bass_penalty(prev_voicing, v)
+        b_pen = bass_penalty(prev_voicing, v, prof)
 
         repeat_pen = 900.0 if (prev_voicing is not None and sorted(prev_voicing) == v) else 0.0
 
         raw_pen = 0.0
-        if ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped):
+        if ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped, low, high):
             raw_pen = RAW_PENALTY
 
         cross_pen = 0.0
@@ -1543,30 +1596,23 @@ def choose_best_voicing(
             bad_left = len(bad_cross_semitone_indices(prev_voicing, v, allowed_pcs))
             cross_pen = bad_left * 25000.0
 
-        return reg_pen + span_pen + space_pen + move_pen + b_pen + repeat_pen + raw_pen + cross_pen
+        # Prevent sudden whole-chord register jumps
+        reg_jump_pen = 0.0
+        if prev_voicing is not None:
+            jump = abs(center(v) - center(prev_voicing))
+            if jump > prof["max_register_jump"]:
+                reg_jump_pen = (jump - prof["max_register_jump"]) * 140.0
+
+        return reg_pen + span_pen + space_pen + move_pen + b_pen + repeat_pen + raw_pen + cross_pen + reg_jump_pen
 
     cands.sort(key=cost)
-    return sorted(cands[0])
+    best = sorted(cands[0])
+    return best
 
 
 # =========================================================
 # EXPORTER
 # =========================================================
-BPM = 85
-TIME_SIG = (4, 4)
-BASE_OCTAVE = 3
-VELOCITY = 100
-
-BAR_DIR = {4: "4-bar", 8: "8-bar", 16: "16-bar"}
-
-
-def sec_per_bar(bpm=BPM, ts=TIME_SIG):
-    return (60.0 / bpm) * ts[0]
-
-
-SEC_PER_BAR = sec_per_bar()
-
-
 def safe_token(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_#-]+", "", str(s))
 
@@ -1588,37 +1634,21 @@ def validate_progressions(progressions):
         if bars not in (4, 8, 16):
             raise ValueError(f"Progression {i}: invalid bar sum {bars}.")
         for ch in chords:
-            chord_to_midi(ch, base_oct=BASE_OCTAVE)
+            chord_to_midi(ch)
 
 
-def _stable_int(s: str) -> int:
-    h = hashlib.md5(s.encode("utf-8")).hexdigest()
-    return int(h[:8], 16)
-
-
-def write_progression_midi(
-    out_root: str,
-    idx: int,
-    chords,
-    durations,
-    key_name: str,
-    revoice: bool,
-    seed: int,
-    voicing_style: str,
-):
+def write_progression_midi(out_root: str, idx: int, chords, durations, key_name: str, revoice: bool, seed: int):
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
 
-    raw = [chord_to_midi(ch, base_oct=BASE_OCTAVE) for ch in chords]
+    raw = [chord_to_midi(ch) for ch in chords]
 
     if revoice:
-        apply_voicing_preset(voicing_style)
-
         voiced = []
         prev_v = None
         prev_name = chords[0]
-        rng = random.Random(seed + idx + _stable_int(voicing_style))
+        rng = random.Random(seed + idx)
 
         for ch_name, notes in zip(chords, raw):
             if prev_v is None:
@@ -1638,14 +1668,12 @@ def write_progression_midi(
     for notes, bars in zip(out_notes, durations):
         dur = bars * SEC_PER_BAR
         for p in sorted(set(notes)):
-            inst.notes.append(
-                pretty_midi.Note(
-                    velocity=int(VELOCITY),
-                    pitch=int(p),
-                    start=t,
-                    end=t + dur
-                )
-            )
+            inst.notes.append(pretty_midi.Note(
+                velocity=int(VELOCITY),
+                pitch=int(p),
+                start=t,
+                end=t + dur
+            ))
         t += dur
 
     midi.instruments.append(inst)
@@ -1659,38 +1687,26 @@ def write_progression_midi(
     midi.write(os.path.join(out_dir, filename))
 
 
-def write_single_chord_midi(
-    out_root: str,
-    chord_name: str,
-    revoice: bool,
-    seed: int,
-    voicing_style: str,
-    length_bars=4
-):
+def write_single_chord_midi(out_root: str, chord_name: str, revoice: bool, length_bars=4, seed: int = 1337):
     dur = length_bars * SEC_PER_BAR
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
 
-    raw = chord_to_midi(chord_name, base_oct=BASE_OCTAVE)
-
+    raw = chord_to_midi(chord_name)
     if revoice:
-        apply_voicing_preset(voicing_style)
-        # Deterministic per chord + seed + style
-        rng = random.Random(seed + _stable_int(chord_name) + _stable_int(voicing_style))
+        rng = random.Random(seed)
         notes = choose_best_voicing(None, chord_name, chord_name, raw, "C", rng)
     else:
         notes = raw
 
     for p in sorted(set(notes)):
-        inst.notes.append(
-            pretty_midi.Note(
-                velocity=int(VELOCITY),
-                pitch=int(p),
-                start=0.0,
-                end=dur
-            )
-        )
+        inst.notes.append(pretty_midi.Note(
+            velocity=int(VELOCITY),
+            pitch=int(p),
+            start=0.0,
+            end=dur
+        ))
 
     midi.instruments.append(inst)
 
@@ -1709,7 +1725,7 @@ def zip_pack(out_root: str, zip_path: str):
                 z.write(full, arcname=rel)
 
 
-def build_pack(progressions, revoice: bool, seed: int, voicing_style: str) -> tuple[str, int, str]:
+def build_pack(progressions, revoice: bool, seed: int) -> tuple[str, int, str]:
     validate_progressions(progressions)
 
     workdir = tempfile.mkdtemp(prefix="aa_midi_")
@@ -1718,27 +1734,11 @@ def build_pack(progressions, revoice: bool, seed: int, voicing_style: str) -> tu
 
     unique_chords = set()
     for i, (chords, durations, key_name) in enumerate(progressions, start=1):
-        write_progression_midi(
-            prog_root,
-            i,
-            chords,
-            durations,
-            key_name,
-            revoice=revoice,
-            seed=seed,
-            voicing_style=voicing_style,
-        )
+        write_progression_midi(prog_root, i, chords, durations, key_name, revoice=revoice, seed=seed)
         unique_chords.update(chords)
 
     for ch in sorted(unique_chords):
-        write_single_chord_midi(
-            prog_root,
-            ch,
-            revoice=revoice,
-            seed=seed,
-            voicing_style=voicing_style,
-            length_bars=4
-        )
+        write_single_chord_midi(prog_root, ch, revoice=revoice, length_bars=4, seed=seed + 999)
 
     base = DOWNLOAD_NAME[:-4] if DOWNLOAD_NAME.lower().endswith(".zip") else DOWNLOAD_NAME
     final_zip_name = f"{base}_Revoiced.zip" if revoice else DOWNLOAD_NAME
@@ -1767,8 +1767,6 @@ def make_rows(progressions):
 # =========================================================
 # ADVANCED SETTINGS (UI + STATE)
 # =========================================================
-ENABLE_CHORD_TYPE_SLIDERS = True
-
 ADV_QUALITIES = [
     ("maj9", "MAJ9"), ("maj7", "MAJ7"), ("add9", "ADD9"), ("6add9", "6ADD9"), ("6", "6"), ("maj", "MAJ"),
     ("min9", "MIN9"), ("min7", "MIN7"), ("min11", "MIN11"), ("min", "MIN"),
@@ -1781,6 +1779,7 @@ def ensure_adv_defaults():
         return
     for qual, _ in ADV_QUALITIES:
         st.session_state.setdefault(f"{ADV_KEY_PREFIX}{qual}", ADV_DEFAULT_VALUE)
+    st.session_state.setdefault(VOICING_PROFILE_KEY, "Default")
 
 
 def read_adv_balance() -> Optional[Dict[str, int]]:
@@ -1797,6 +1796,7 @@ def reset_adv_defaults():
         return
     for qual, _ in ADV_QUALITIES:
         st.session_state[f"{ADV_KEY_PREFIX}{qual}"] = ADV_DEFAULT_VALUE
+    st.session_state[VOICING_PROFILE_KEY] = "Default"
 
 
 # =========================================================
@@ -1870,27 +1870,20 @@ with sp_center:
             st.session_state.setdefault(BANLIST_STATE_KEY, {"banned_set": set(), "stats": {}, "examples": []})
             st.caption("No banlist uploaded.")
 
-    # =========================================================
-    # ADVANCED SETTINGS (single expander, no duplicates)
-    # Always includes Re-Voicing style.
-    # Chord sliders appear only if enabled.
-    # =========================================================
-    st.session_state.setdefault("aa_voicing_style", "Balanced (Default)")
+    # ADVANCED SETTINGS UI (single render, no duplicates)
+    if ENABLE_CHORD_BALANCE_FEATURE and ENABLE_CHORD_TYPE_SLIDERS:
+        ensure_adv_defaults()
 
-    with st.expander("ADVANCED SETTINGS", expanded=False):
-        st.markdown("### RE-VOICING STYLE")
-        st.caption("Only affects output when Re-Voicing is enabled. All styles keep strict safety rules.")
-        st.selectbox(
-            "Voicing Style",
-            options=list(VOICING_PRESETS.keys()),
-            key="aa_voicing_style",
-        )
+        with st.expander("ADVANCED SETTINGS", expanded=False):
+            st.caption("Chord type balance: 0 disables. 50 is default. 100 strongly favors.")
 
-        if ENABLE_CHORD_BALANCE_FEATURE and ENABLE_CHORD_TYPE_SLIDERS:
-            ensure_adv_defaults()
-
-            st.markdown("### CHORD TYPE BALANCE")
-            st.caption("0 disables. 50 is default. 100 strongly favors.")
+            st.markdown("### RE-VOICING STYLE")
+            st.selectbox(
+                "Voicing Profile",
+                options=list(VOICING_PROFILES.keys()),
+                key=VOICING_PROFILE_KEY,
+                help="Default is balanced. Tight keeps notes closer. Wide opens the chord. Deep Low Ambient brings bass lower with smooth motion.",
+            )
 
             cL, cM, cR = st.columns([1, 2, 1])
             with cM:
@@ -1900,21 +1893,21 @@ with sp_center:
 
             st.markdown("### MAJOR FAMILY")
             c1, c2 = st.columns(2)
-            majors = [x for x in ADV_QUALITIES if x[0] in ("maj9","maj7","add9","6add9","6","maj")]
+            majors = [x for x in ADV_QUALITIES if x[0] in ("maj9", "maj7", "add9", "6add9", "6", "maj")]
             for i, (qual, label) in enumerate(majors):
                 with (c1 if i % 2 == 0 else c2):
                     st.slider(label, 0, 100, key=f"{ADV_KEY_PREFIX}{qual}")
 
             st.markdown("### MINOR FAMILY")
             c1, c2 = st.columns(2)
-            minors = [x for x in ADV_QUALITIES if x[0] in ("min9","min7","min11","min")]
+            minors = [x for x in ADV_QUALITIES if x[0] in ("min9", "min7", "min11", "min")]
             for i, (qual, label) in enumerate(minors):
                 with (c1 if i % 2 == 0 else c2):
                     st.slider(label, 0, 100, key=f"{ADV_KEY_PREFIX}{qual}")
 
             st.markdown("### SUS FAMILY")
             c1, c2 = st.columns(2)
-            suss = [x for x in ADV_QUALITIES if x[0] in ("sus2add9","sus4add9","sus2","sus4")]
+            suss = [x for x in ADV_QUALITIES if x[0] in ("sus2add9", "sus4add9", "sus2", "sus4")]
             for i, (qual, label) in enumerate(suss):
                 with (c1 if i % 2 == 0 else c2):
                     st.slider(label, 0, 100, key=f"{ADV_KEY_PREFIX}{qual}")
@@ -1946,14 +1939,7 @@ if generate_clicked:
             if low_sim_total != 0:
                 raise RuntimeError("Safety check failed: low-sim transitions detected.")
 
-            voicing_style = st.session_state.get("aa_voicing_style", "Balanced (Default)")
-
-            zip_path, chord_count, final_zip_name = build_pack(
-                progressions,
-                revoice=bool(revoice),
-                seed=seed,
-                voicing_style=voicing_style
-            )
+            zip_path, chord_count, final_zip_name = build_pack(progressions, revoice=bool(revoice), seed=seed)
 
             st.session_state["progressions"] = progressions
             st.session_state["zip_path"] = zip_path
@@ -2005,6 +1991,7 @@ if "progressions" in st.session_state and st.session_state.get("zip_path"):
 
     st.markdown("### Progressions List")
     st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 
 
