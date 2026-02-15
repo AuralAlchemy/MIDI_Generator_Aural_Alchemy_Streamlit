@@ -1887,9 +1887,13 @@ with sp_center:
 
             cL, cM, cR = st.columns([1, 2, 1])
             with cM:
-                if st.button("Default", use_container_width=False, key="aa_reset_defaults"):
-                    reset_adv_defaults()
-                    st.rerun()
+                st.button(
+                    "Default",
+                    use_container_width=False,
+                    key="aa_reset_defaults",
+                    on_click=reset_adv_defaults
+                )
+
 
             st.markdown("### MAJOR FAMILY")
             c1, c2 = st.columns(2)
