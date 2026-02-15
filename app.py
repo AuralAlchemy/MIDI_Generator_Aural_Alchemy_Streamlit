@@ -16,6 +16,7 @@ import math
 import random
 import tempfile
 import base64
+import hashlib
 from zipfile import ZipFile
 from collections import Counter
 from typing import List, Optional, Dict, Tuple
@@ -395,7 +396,7 @@ GEOM_SVG = """
 # Second layer SVG WITHOUT triangle
 GEOM_SVG_NO_TRIANGLE = GEOM_SVG.replace(
     '<polygon points="600,220 929.1,790 270.9,790" opacity="0.90"/>',
-    ''
+    ""
 )
 
 GEOM_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(GEOM_SVG.encode("utf-8")).decode("utf-8")
@@ -520,25 +521,20 @@ def _normalize_quality(q: str) -> str:
     q = q.replace("6/9", "6add9").replace("6\\9", "6add9")
     q_low = q.lower()
 
-    # maj6 -> 6
     if q_low in ("maj6", "ma6"):
         return "6"
 
-    # keep maj* as-is
     if q_low.startswith("maj"):
         return q_low
 
-    # m / m7 / m9 / m11 shorthand
     if q_low == "m":
         return "min"
     if q_low.startswith("m") and len(q_low) > 1 and q_low[1].isdigit():
         return "min" + q_low[1:]
 
-    # min* already ok
     if q_low.startswith("min"):
         return q_low
 
-    # sus / add9 / 6 / 6add9 etc
     return q_low
 
 
@@ -576,11 +572,9 @@ def _is_meta_line(line: str) -> bool:
 
     s_up = s.upper()
 
-    # PACK headers
     if re.match(r"^PACK\s*\d+\s*$", s_up) or s_up.startswith("PACK"):
         return True
 
-    # bar section headers
     if s_up in ("4-BAR", "8-BAR", "16-BAR"):
         return True
     if re.match(r"^\s*(4|8|16)\s*-\s*BAR\s*$", s_up):
@@ -593,7 +587,6 @@ def _extract_progression_text(line: str) -> str:
     s = (line or "").strip()
     if ":" in s:
         left, right = s.split(":", 1)
-        # If it looks like a "Prog..." label, take the right side
         if "PROG" in left.upper():
             return right.strip()
     return s
@@ -1091,7 +1084,6 @@ def generate_progressions(
 
             chords, durs, _k, degs_used, quals_used = res
 
-            # BANLIST check (ordered, start matters)
             if ban_set and progression_is_banned(chords, ban_set):
                 continue
 
@@ -1163,6 +1155,61 @@ GLUE_PROBABILITY = 0.30
 # Resolution allowed for cross-semitone repair
 ALLOW_RESOLVE_TO_THIRD = True
 ALLOW_RESOLVE_TO_FIFTH = False
+
+
+# =========================================================
+# RE-VOICING STYLE PRESETS (safe, controlled)
+# =========================================================
+# Presets only adjust register + span targets. All safety penalties remain.
+VOICING_PRESETS = {
+    "Balanced (Default)": {
+        "TARGET_CENTER": 60.0,
+        "IDEAL_SPAN": 12,
+        "MIN_SPAN": 8,
+        "MAX_SPAN": 19,
+        "MIN_ADJ_GAP": 2,
+        "MAX_ADJ_GAP": 9,
+        "HARD_MAX_ADJ_GAP": 12,
+    },
+    "Tight (Intimate)": {
+        "TARGET_CENTER": 60.0,
+        "IDEAL_SPAN": 10,
+        "MIN_SPAN": 7,
+        "MAX_SPAN": 16,
+        "MIN_ADJ_GAP": 2,
+        "MAX_ADJ_GAP": 8,
+        "HARD_MAX_ADJ_GAP": 11,
+    },
+    "Wide (Cinematic)": {
+        "TARGET_CENTER": 62.0,
+        "IDEAL_SPAN": 15,
+        "MIN_SPAN": 10,
+        "MAX_SPAN": 23,
+        "MIN_ADJ_GAP": 2,
+        "MAX_ADJ_GAP": 10,
+        "HARD_MAX_ADJ_GAP": 13,
+    },
+}
+
+
+def apply_voicing_preset(preset_name: str):
+    """
+    Applies a preset by updating the global voicing targets.
+    Called only during export when re-voicing is enabled.
+    """
+    global TARGET_CENTER, IDEAL_SPAN, MIN_SPAN, MAX_SPAN
+    global MIN_ADJ_GAP, MAX_ADJ_GAP, HARD_MAX_ADJ_GAP
+
+    p = VOICING_PRESETS.get(preset_name) or VOICING_PRESETS["Balanced (Default)"]
+
+    TARGET_CENTER = float(p["TARGET_CENTER"])
+    IDEAL_SPAN = int(p["IDEAL_SPAN"])
+    MIN_SPAN = int(p["MIN_SPAN"])
+    MAX_SPAN = int(p["MAX_SPAN"])
+
+    MIN_ADJ_GAP = int(p["MIN_ADJ_GAP"])
+    MAX_ADJ_GAP = int(p["MAX_ADJ_GAP"])
+    HARD_MAX_ADJ_GAP = int(p["HARD_MAX_ADJ_GAP"])
 
 
 def parse_root_and_bass(ch: str):
@@ -1544,7 +1591,21 @@ def validate_progressions(progressions):
             chord_to_midi(ch, base_oct=BASE_OCTAVE)
 
 
-def write_progression_midi(out_root: str, idx: int, chords, durations, key_name: str, revoice: bool, seed: int):
+def _stable_int(s: str) -> int:
+    h = hashlib.md5(s.encode("utf-8")).hexdigest()
+    return int(h[:8], 16)
+
+
+def write_progression_midi(
+    out_root: str,
+    idx: int,
+    chords,
+    durations,
+    key_name: str,
+    revoice: bool,
+    seed: int,
+    voicing_style: str,
+):
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
@@ -1552,10 +1613,12 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     raw = [chord_to_midi(ch, base_oct=BASE_OCTAVE) for ch in chords]
 
     if revoice:
+        apply_voicing_preset(voicing_style)
+
         voiced = []
         prev_v = None
         prev_name = chords[0]
-        rng = random.Random(seed + idx)
+        rng = random.Random(seed + idx + _stable_int(voicing_style))
 
         for ch_name, notes in zip(chords, raw):
             if prev_v is None:
@@ -1575,12 +1638,14 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     for notes, bars in zip(out_notes, durations):
         dur = bars * SEC_PER_BAR
         for p in sorted(set(notes)):
-            inst.notes.append(pretty_midi.Note(
-                velocity=int(VELOCITY),
-                pitch=int(p),
-                start=t,
-                end=t + dur
-            ))
+            inst.notes.append(
+                pretty_midi.Note(
+                    velocity=int(VELOCITY),
+                    pitch=int(p),
+                    start=t,
+                    end=t + dur
+                )
+            )
         t += dur
 
     midi.instruments.append(inst)
@@ -1594,26 +1659,38 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     midi.write(os.path.join(out_dir, filename))
 
 
-def write_single_chord_midi(out_root: str, chord_name: str, revoice: bool, length_bars=4):
+def write_single_chord_midi(
+    out_root: str,
+    chord_name: str,
+    revoice: bool,
+    seed: int,
+    voicing_style: str,
+    length_bars=4
+):
     dur = length_bars * SEC_PER_BAR
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
 
     raw = chord_to_midi(chord_name, base_oct=BASE_OCTAVE)
+
     if revoice:
-        rng = random.Random()
+        apply_voicing_preset(voicing_style)
+        # Deterministic per chord + seed + style
+        rng = random.Random(seed + _stable_int(chord_name) + _stable_int(voicing_style))
         notes = choose_best_voicing(None, chord_name, chord_name, raw, "C", rng)
     else:
         notes = raw
 
     for p in sorted(set(notes)):
-        inst.notes.append(pretty_midi.Note(
-            velocity=int(VELOCITY),
-            pitch=int(p),
-            start=0.0,
-            end=dur
-        ))
+        inst.notes.append(
+            pretty_midi.Note(
+                velocity=int(VELOCITY),
+                pitch=int(p),
+                start=0.0,
+                end=dur
+            )
+        )
 
     midi.instruments.append(inst)
 
@@ -1632,7 +1709,7 @@ def zip_pack(out_root: str, zip_path: str):
                 z.write(full, arcname=rel)
 
 
-def build_pack(progressions, revoice: bool, seed: int) -> tuple[str, int, str]:
+def build_pack(progressions, revoice: bool, seed: int, voicing_style: str) -> tuple[str, int, str]:
     validate_progressions(progressions)
 
     workdir = tempfile.mkdtemp(prefix="aa_midi_")
@@ -1641,11 +1718,27 @@ def build_pack(progressions, revoice: bool, seed: int) -> tuple[str, int, str]:
 
     unique_chords = set()
     for i, (chords, durations, key_name) in enumerate(progressions, start=1):
-        write_progression_midi(prog_root, i, chords, durations, key_name, revoice=revoice, seed=seed)
+        write_progression_midi(
+            prog_root,
+            i,
+            chords,
+            durations,
+            key_name,
+            revoice=revoice,
+            seed=seed,
+            voicing_style=voicing_style,
+        )
         unique_chords.update(chords)
 
     for ch in sorted(unique_chords):
-        write_single_chord_midi(prog_root, ch, revoice=revoice, length_bars=4)
+        write_single_chord_midi(
+            prog_root,
+            ch,
+            revoice=revoice,
+            seed=seed,
+            voicing_style=voicing_style,
+            length_bars=4
+        )
 
     base = DOWNLOAD_NAME[:-4] if DOWNLOAD_NAME.lower().endswith(".zip") else DOWNLOAD_NAME
     final_zip_name = f"{base}_Revoiced.zip" if revoice else DOWNLOAD_NAME
@@ -1777,12 +1870,27 @@ with sp_center:
             st.session_state.setdefault(BANLIST_STATE_KEY, {"banned_set": set(), "stats": {}, "examples": []})
             st.caption("No banlist uploaded.")
 
-    # ADVANCED SETTINGS UI (single render, no duplicates)
-    if ENABLE_CHORD_BALANCE_FEATURE and ENABLE_CHORD_TYPE_SLIDERS:
-        ensure_adv_defaults()
+    # =========================================================
+    # ADVANCED SETTINGS (single expander, no duplicates)
+    # Always includes Re-Voicing style.
+    # Chord sliders appear only if enabled.
+    # =========================================================
+    st.session_state.setdefault("aa_voicing_style", "Balanced (Default)")
 
-        with st.expander("ADVANCED SETTINGS", expanded=False):
-            st.caption("Chord type balance: 0 disables. 50 is default. 100 strongly favors.")
+    with st.expander("ADVANCED SETTINGS", expanded=False):
+        st.markdown("### RE-VOICING STYLE")
+        st.caption("Only affects output when Re-Voicing is enabled. All styles keep strict safety rules.")
+        st.selectbox(
+            "Voicing Style",
+            options=list(VOICING_PRESETS.keys()),
+            key="aa_voicing_style",
+        )
+
+        if ENABLE_CHORD_BALANCE_FEATURE and ENABLE_CHORD_TYPE_SLIDERS:
+            ensure_adv_defaults()
+
+            st.markdown("### CHORD TYPE BALANCE")
+            st.caption("0 disables. 50 is default. 100 strongly favors.")
 
             cL, cM, cR = st.columns([1, 2, 1])
             with cM:
@@ -1838,7 +1946,14 @@ if generate_clicked:
             if low_sim_total != 0:
                 raise RuntimeError("Safety check failed: low-sim transitions detected.")
 
-            zip_path, chord_count, final_zip_name = build_pack(progressions, revoice=bool(revoice), seed=seed)
+            voicing_style = st.session_state.get("aa_voicing_style", "Balanced (Default)")
+
+            zip_path, chord_count, final_zip_name = build_pack(
+                progressions,
+                revoice=bool(revoice),
+                seed=seed,
+                voicing_style=voicing_style
+            )
 
             st.session_state["progressions"] = progressions
             st.session_state["zip_path"] = zip_path
