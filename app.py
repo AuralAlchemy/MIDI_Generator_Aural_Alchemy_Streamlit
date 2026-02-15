@@ -1824,7 +1824,7 @@ with sp_center:
     n_progressions = st.slider(
         "Progressions to Generate",
         min_value=1,
-        max_value=100,
+        max_value=200,
         value=10,
         help="Generates a balanced mix of 4, 8, and 16-bar chord loops in different keys.",
     )
