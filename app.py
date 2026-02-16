@@ -1803,6 +1803,12 @@ NOTE_MAX_MIDI = 88     # soft ceiling (keeps voicings from flying too high)
 
 MAX_OCTAVE_SHIFTS = 6  # safety cap so we never loop forever
 
+# =========================================================
+# GLOBAL TRANSPOSE (MASTER OCTAVE SHIFT)
+# =========================================================
+GLOBAL_TRANSPOSE = 12   # 12 = +1 octave, 0 = off
+
+
 
 def _shift_octaves(notes: List[int], octs: int) -> List[int]:
     return [int(n + 12 * octs) for n in notes]
@@ -1940,20 +1946,20 @@ def write_progression_midi(
     else:
         out_notes = raw
 
-    t = 0.0
     for notes, bars in zip(out_notes, durations):
-        # One more safety lock right before writing
-        notes = _enforce_register(notes)
+    dur = bars * SEC_PER_BAR
 
-        dur = bars * SEC_PER_BAR
-        for p in sorted(set(notes)):
-            inst.notes.append(pretty_midi.Note(
-                velocity=int(VELOCITY),
-                pitch=int(p),
-                start=t,
-                end=t + dur
-            ))
-        t += dur
+    # APPLY GLOBAL TRANSPOSE
+    shifted = [int(p + GLOBAL_TRANSPOSE) for p in notes]
+
+    for p in sorted(set(shifted)):
+        inst.notes.append(pretty_midi.Note(
+            velocity=int(VELOCITY),
+            pitch=int(p),
+            start=t,
+            end=t + dur
+        ))
+
 
     midi.instruments.append(inst)
 
@@ -1990,13 +1996,17 @@ def write_single_chord_midi(
     # Final hard lock
     notes = _enforce_register(notes)
 
-    for p in sorted(set(notes)):
+    # APPLY GLOBAL TRANSPOSE
+    shifted = [int(p + GLOBAL_TRANSPOSE) for p in notes]
+
+    for p in sorted(set(shifted)):
         inst.notes.append(pretty_midi.Note(
             velocity=int(VELOCITY),
             pitch=int(p),
             start=0.0,
             end=dur
         ))
+
 
     midi.instruments.append(inst)
 
