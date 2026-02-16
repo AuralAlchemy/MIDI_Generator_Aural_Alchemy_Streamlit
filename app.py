@@ -1902,9 +1902,131 @@ def validate_progressions(progressions):
         bars = sum(durations)
         if bars not in (4, 8, 16):
             raise ValueError(f"Progression {i}: invalid bar sum {bars}.")
-        # Validate chord parsing and enforce register on raw chord
         for ch in chords:
             _ = _enforce_register(chord_to_midi(ch))
+
+
+def _oct_shift(notes: List[int], k: int) -> List[int]:
+    return [int(n + 12 * k) for n in notes]
+
+
+def _shared_exact(prev: List[int], cur: List[int]) -> int:
+    return len(set(prev) & set(cur))
+
+
+def _voice_leading_cost(prev: List[int], cur: List[int]) -> float:
+    return _min_assignment_move(prev, cur)
+
+
+def optimize_progression_register(
+    chords_notes: List[List[int]],
+    search_shifts=range(-2, 3),
+) -> List[List[int]]:
+    """
+    Post-process each chord so adjacent chords:
+    - share as many exact notes as possible
+    - otherwise move as little as possible
+    Always respects your register lock (_enforce_register).
+    """
+    if not chords_notes:
+        return chords_notes
+
+    out: List[List[int]] = []
+    prev = _enforce_register(chords_notes[0])
+    out.append(prev)
+
+    for cur_raw in chords_notes[1:]:
+        best = None
+        best_score = None
+
+        for k in search_shifts:
+            cand = _enforce_register(_oct_shift(cur_raw, k))
+
+            shared = _shared_exact(prev, cand)
+            move = _voice_leading_cost(prev, cand)
+            bass_jump = abs(min(cand) - min(prev))
+
+            # Higher is better: more shared, less movement, less bass jump
+            score = (shared, -move, -bass_jump)
+
+            if best_score is None or score > best_score:
+                best_score = score
+                best = cand
+
+        prev = best if best is not None else _enforce_register(cur_raw)
+        out.append(prev)
+
+    return out
+
+
+def write_progression_midi(
+    out_root: str,
+    idx: int,
+    chords,
+    durations,
+    key_name: str,
+    revoice: bool,
+    seed: int
+):
+    midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
+    midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
+    inst = pretty_midi.Instrument(program=0)
+
+    # RAW notes are always register locked
+    raw = [_enforce_register(chord_to_midi(ch)) for ch in chords]
+
+    if revoice:
+        voiced = []
+        prev_v = None
+        prev_name = chords[0]
+        rng = random.Random(seed + idx)
+
+        for ch_name, notes in zip(chords, raw):
+            if prev_v is None:
+                v = choose_best_voicing(None, ch_name, ch_name, notes, key_name, rng)
+            else:
+                v = choose_best_voicing(prev_v, prev_name, ch_name, notes, key_name, rng)
+
+            v = _enforce_register(v)
+
+            voiced.append(v)
+            prev_v = v
+            prev_name = ch_name
+
+        out_notes = voiced
+    else:
+        out_notes = raw
+
+    # NEW: octave/register optimizer for shared notes + closest adjacent chords
+    out_notes = optimize_progression_register(out_notes)
+
+    t = 0.0
+    for notes, bars in zip(out_notes, durations):
+        dur = bars * SEC_PER_BAR
+
+        # APPLY GLOBAL TRANSPOSE (per chord)
+        shifted = [int(p + GLOBAL_TRANSPOSE) for p in notes]
+
+        for p in sorted(set(shifted)):
+            inst.notes.append(pretty_midi.Note(
+                velocity=int(VELOCITY),
+                pitch=int(p),
+                start=t,
+                end=t + dur
+            ))
+
+        t += dur
+
+    midi.instruments.append(inst)
+
+    total_bars = sum(durations)
+    out_dir = os.path.join(out_root, "Progressions", BAR_DIR[total_bars])
+    os.makedirs(out_dir, exist_ok=True)
+
+    rv_tag = "_Revoiced" if revoice else ""
+    filename = f"Prog_{idx:03d}_in_{safe_token(key_name)}_{chord_list_token(chords)}{rv_tag}.mid"
+    midi.write(os.path.join(out_dir, filename))
+
 
 
 def write_progression_midi(
