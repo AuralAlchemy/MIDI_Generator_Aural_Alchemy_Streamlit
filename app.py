@@ -1937,7 +1937,7 @@ def _voice_leading_cost(prev: List[int], cur: List[int]) -> float:
 
 def optimize_progression_register(
     chords_notes: List[List[int]],
-    search_shifts=range(-2, 3),
+    search_shifts=range(-3, 4),
 ) -> List[List[int]]:
     """
     For each chord after the first, try octave shifts and pick the best one.
