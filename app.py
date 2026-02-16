@@ -1747,17 +1747,25 @@ def choose_best_voicing(
     best = _prefer_bass_zone(_sanitize_notes_strict(best))
     return best
 # =========================================================
-# GLOBAL TIMING SETTINGS
+# GLOBAL TIMING + EXPORT SETTINGS
 # =========================================================
+
 BPM = 85
 TIME_SIG = (4, 4)
 BASE_OCTAVE = 3
 VELOCITY = 100
 
+BAR_DIR = {
+    4: "4-bar",
+    8: "8-bar",
+    16: "16-bar"
+}
+
 def sec_per_bar(bpm=BPM, ts=TIME_SIG):
     return (60.0 / bpm) * ts[0]
 
 SEC_PER_BAR = sec_per_bar()
+
 
 
 
