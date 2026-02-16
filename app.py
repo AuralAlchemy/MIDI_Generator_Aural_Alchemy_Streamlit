@@ -1910,8 +1910,11 @@ def _oct_shift(notes: List[int], k: int) -> List[int]:
     return [int(n + 12 * k) for n in notes]
 
 
-def _shared_exact(prev: List[int], cur: List[int]) -> int:
-    return len(set(prev) & set(cur))
+def _shared_pitch_class(prev: List[int], cur: List[int]) -> int:
+    prev_pc = {p % 12 for p in prev}
+    cur_pc = {p % 12 for p in cur}
+    return len(prev_pc & cur_pc)
+
 
 
 def _voice_leading_cost(prev: List[int], cur: List[int]) -> float:
@@ -1942,7 +1945,7 @@ def optimize_progression_register(
         for k in search_shifts:
             cand = _enforce_register(_oct_shift(cur_raw, k))
 
-            shared = _shared_exact(prev, cand)
+            shared = _shared_pitch_class(prev, cand)
             move = _voice_leading_cost(prev, cand)
             bass_jump = abs(min(cand) - min(prev))
 
