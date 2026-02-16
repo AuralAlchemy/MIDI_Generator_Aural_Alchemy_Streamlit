@@ -505,12 +505,15 @@ def _wchoice(rng: random.Random, items_with_w):
 
 
 # =========================================================
-# BANLIST (TXT UPLOAD) - robust parser + ordered matching
+# BANLIST (TXT UPLOAD) - SMART EXTRACTOR + ordered matching
+# Extracts chord progressions from messy txt (headers, notes, bullets)
+# Start matters (ordered match) by default
 # =========================================================
-BANLIST_STATE_KEY = "aa_banlist_v1"
+BANLIST_STATE_KEY = "aa_banlist_v2"  # bump to avoid stale session_state issues
 
 
 def _norm_dash(s: str) -> str:
+    # Normalize different dash chars to "-"
     return (s or "").replace("–", "-").replace("—", "-").replace("−", "-")
 
 
@@ -519,28 +522,43 @@ def _normalize_quality(q: str) -> str:
     q = q.replace("6/9", "6add9").replace("6\\9", "6add9")
     q_low = q.lower()
 
+    # maj6 -> 6
     if q_low in ("maj6", "ma6"):
         return "6"
 
+    # keep maj* as-is
     if q_low.startswith("maj"):
         return q_low
 
+    # m shorthand
     if q_low == "m":
         return "min"
+
+    # m7/m9/m11 shorthand
     if q_low.startswith("m") and len(q_low) > 1 and q_low[1].isdigit():
         return "min" + q_low[1:]
 
+    # min* already ok
     if q_low.startswith("min"):
         return q_low
 
+    # sus / add9 / 6 / 6add9 etc
     return q_low
 
 
 def _normalize_chord_token(tok: str) -> str:
+    """
+    Normalizes a chord token like:
+      'C min7' -> 'Cmin7'
+      'Bb 6/9' -> 'Bb6add9'
+    Returns "" if invalid.
+    """
     t = (tok or "").strip()
     if not t:
         return ""
-    t = _norm_dash(t).replace(" ", "")
+
+    t = _norm_dash(t)
+    t = t.replace(" ", "")
     t = t.replace("6/9", "6add9").replace("6\\9", "6add9")
     t = re.sub(r"[,\.;]+$", "", t)
 
@@ -551,6 +569,8 @@ def _normalize_chord_token(tok: str) -> str:
     root = m.group(1)
     rest = m.group(2)
 
+    # normalize root case (C, Db, F#)
+    root = root[0].upper() + (root[1:] if len(root) > 1 else "")
     if root not in NOTE_TO_PC:
         return ""
 
@@ -562,14 +582,21 @@ def _normalize_chord_token(tok: str) -> str:
 
 
 def _is_meta_line(line: str) -> bool:
+    """
+    Optional: keep meta skipping for common headers,
+    but smart extraction would ignore them anyway.
+    """
     s = (line or "").strip()
     if not s:
         return False
+
     s_up = s.upper()
 
+    # PACK headers
     if re.match(r"^PACK\s*\d+\s*$", s_up) or s_up.startswith("PACK"):
         return True
 
+    # bar section headers
     if s_up in ("4-BAR", "8-BAR", "16-BAR"):
         return True
     if re.match(r"^\s*(4|8|16)\s*-\s*BAR\s*$", s_up):
@@ -578,31 +605,84 @@ def _is_meta_line(line: str) -> bool:
     return False
 
 
-def _extract_progression_text(line: str) -> str:
-    s = (line or "").strip()
-    if ":" in s:
-        left, right = s.split(":", 1)
-        if "PROG" in left.upper():
-            return right.strip()
-    return s
+# ---------------------------------------------------------
+# SMART CHORD EXTRACTION
+# ---------------------------------------------------------
+def _build_quality_regex() -> str:
+    # Longest first to avoid partial matches (sus2add9 before sus2, etc)
+    quals_sorted = sorted(list(QUAL_TO_INTERVALS.keys()), key=len, reverse=True)
+    return r"(?:%s)" % "|".join(re.escape(q) for q in quals_sorted)
 
 
-def _split_chord_tokens(prog_text: str) -> List[str]:
-    s = _norm_dash(prog_text).strip()
-    s = s.replace("->", "-").replace("→", "-").replace(">", "-")
-    s = s.replace("|", "-").replace(",", "-").replace(";", "-")
-    s = re.sub(r"-{2,}", "-", s)
-    return [p.strip() for p in s.split("-") if p.strip()]
+_QUAL_REGEX = _build_quality_regex()
+
+# Finds chords anywhere: Root + optional accidental + quality
+# Examples it catches: Cmin7, Dbmaj9, F#sus2add9, Bb6add9, Gadd9, Amin
+_CHORD_TOKEN_RE = re.compile(
+    rf"\b([A-G])([#b]?)\s*({_QUAL_REGEX})\b",
+    flags=re.IGNORECASE
+)
+
+
+def _extract_chords_anywhere(line: str) -> List[str]:
+    """
+    Extract valid chords from messy text.
+    Returns normalized chord tokens like ['Cmin7','Fsus2','Bbmaj7'].
+    """
+    s = _norm_dash(line or "")
+    s = s.replace("6/9", "6add9").replace("6\\9", "6add9")
+
+    out: List[str] = []
+    for m in _CHORD_TOKEN_RE.finditer(s):
+        root = (m.group(1) + m.group(2)).replace(" ", "")
+        qual = (m.group(3) or "").replace(" ", "")
+
+        token = _normalize_chord_token(f"{root}{qual}")
+        if token:
+            out.append(token)
+
+    # collapse immediate duplicates while keeping order
+    if out:
+        dedup = [out[0]]
+        for c in out[1:]:
+            if c != dedup[-1]:
+                dedup.append(c)
+        out = dedup
+
+    return out
+
+
+def _extract_progressions_from_line(line: str) -> List[Tuple[str, ...]]:
+    """
+    Simple heuristic:
+    If a line contains 2+ valid chords, treat the full sequence as one progression.
+    """
+    chords = _extract_chords_anywhere(line)
+    if len(chords) >= 2:
+        return [tuple(chords)]
+    return []
 
 
 def load_banlist_from_txt_bytes(data: bytes) -> Tuple[set, Dict[str, int], List[str]]:
+    """
+    Smarter loader:
+    - Scans each line and extracts chords anywhere in the text
+    - Stores progressions with 2+ chords
+    - Ignores the rest automatically
+    """
     try:
         text = data.decode("utf-8", errors="ignore")
     except Exception:
         text = str(data)
 
-    banned_set = set()
-    stats = {"added": 0, "invalid": 0, "empty": 0, "ignored_meta": 0}
+    banned_set: set = set()
+    stats = {
+        "added": 0,
+        "invalid": 0,
+        "empty": 0,
+        "ignored_meta": 0,
+        "lines_with_chords": 0,
+    }
     bad_examples: List[str] = []
 
     for raw in text.splitlines():
@@ -615,34 +695,42 @@ def load_banlist_from_txt_bytes(data: bytes) -> Tuple[set, Dict[str, int], List[
             stats["ignored_meta"] += 1
             continue
 
-        prog_text = _extract_progression_text(line)
-        toks = _split_chord_tokens(prog_text)
-
-        norm: List[str] = []
-        for t in toks:
-            c = _normalize_chord_token(t)
-            if not c:
-                norm = []
-                break
-            norm.append(c)
-
-        if len(norm) < 2:
-            stats["invalid"] += 1
-            if len(bad_examples) < 10:
-                bad_examples.append((raw or "")[:160])
+        progs = _extract_progressions_from_line(line)
+        if not progs:
+            # If it looks like it tried to be chords but we couldn't parse, log it.
+            low = line.lower()
+            looks_chordish = any(x in low for x in ("maj", "min", "sus", "add", "6"))
+            has_note_letter = re.search(r"\b[A-G][#b]?\b", line) is not None
+            if looks_chordish and has_note_letter:
+                stats["invalid"] += 1
+                if len(bad_examples) < 10:
+                    bad_examples.append(line[:160])
             continue
 
-        banned_set.add(tuple(norm))
-        stats["added"] += 1
+        stats["lines_with_chords"] += 1
+        for prog in progs:
+            if len(prog) >= 2:
+                banned_set.add(tuple(prog))
+                stats["added"] += 1
+            else:
+                stats["invalid"] += 1
 
     return banned_set, stats, bad_examples
 
 
 def progression_is_banned(chords: List[str], banned_set: set) -> bool:
+    """
+    ORDERED match (start matters).
+    """
     if not banned_set or not chords:
         return False
+
     norm = tuple(_normalize_chord_token(c) for c in chords)
+    if any(not x for x in norm):
+        return False
+
     return norm in banned_set
+
 
 
 # =========================================================
