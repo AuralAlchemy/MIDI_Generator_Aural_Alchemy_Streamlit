@@ -1283,23 +1283,58 @@ def get_voicing_profile() -> dict:
 
 
 # =========================================================
-# CHORD -> MIDI + VOICING ENGINE (PROFILE-DRIVEN, SAFE)
+# CHORD -> MIDI + VOICING ENGINE (HARD-SAFE, NO SUB-FLOOR)
 # =========================================================
+
 NOTE_TO_SEMITONE = NOTE_TO_PC.copy()
 
-BPM = 85
-TIME_SIG = (4, 4)
-BASE_OCTAVE = 3
-VELOCITY = 100
+# -------------------------
+# HARD GLOBAL PITCH LIMITS
+# -------------------------
+# ABSOLUTE rule: no note below this MIDI number, ever.
+# Your requested "never below C2-ish": use 40 by default.
+ABS_NOTE_FLOOR = 40
 
-BAR_DIR = {4: "4-bar", 8: "8-bar", 16: "16-bar"}
+# Ceiling is just to keep things musical and not piercing.
+ABS_NOTE_CEIL = 88
 
+# Preferred bass zone (strongly enforced by scoring + repair)
+BASS_PREF_MIN = 40
+BASS_PREF_MAX = 52
 
-def sec_per_bar(bpm=BPM, ts=TIME_SIG):
-    return (60.0 / bpm) * ts[0]
+# Hard bass clamp (even if preferences fail)
+BASS_HARD_MIN = ABS_NOTE_FLOOR
+BASS_HARD_MAX = 60
 
+# Smoothness and spacing
+MAX_BASS_JUMP = 7
 
-SEC_PER_BAR = sec_per_bar()
+# Default voicing “shape” targets (you can tweak later easily)
+TARGET_CENTER = 60.0
+
+IDEAL_SPAN = 12
+MIN_SPAN = 8
+MAX_SPAN = 18
+
+MIN_ADJ_GAP = 2
+MAX_ADJ_GAP = 9
+HARD_MAX_ADJ_GAP = 12
+
+# Shared tone safety
+MAX_SHARED_DEFAULT = 2
+MAX_SHARED_MIN11 = 3
+
+# Keep voicing from staying identical to raw (optional)
+ENFORCE_NOT_RAW_WHEN_VOICING = True
+RAW_PENALTY = 1200
+
+# Prevent semitone “glue clusters” low down
+GLUE_LOW_CUTOFF = 48
+GLUE_PROBABILITY = 0.28
+
+# Cross-semitone repair resolution allowance
+ALLOW_RESOLVE_TO_THIRD = True
+ALLOW_RESOLVE_TO_FIFTH = False
 
 
 def parse_root_and_bass(ch: str):
@@ -1320,35 +1355,98 @@ def parse_root_and_bass(ch: str):
     return root, rest, bass
 
 
-def clamp_to_range(notes: List[int], low: int, high: int) -> List[int]:
+def _force_into_range_by_octaves(p: int, lo: int, hi: int) -> int:
+    # shift by octaves only, preserves pitch class
+    while p < lo:
+        p += 12
+    while p > hi:
+        p -= 12
+    return int(p)
+
+
+def _sanitize_notes_strict(notes: List[int]) -> List[int]:
+    """
+    Absolute last-line safety:
+    - No pitch below ABS_NOTE_FLOOR
+    - No pitch above ABS_NOTE_CEIL
+    - Keep unique pitches (avoid duplicates) while preserving count by octave shifting
+    """
+    v = [int(x) for x in notes]
+    # hard clamp with octave shifting (not simple clamp)
     out = []
-    for p in notes:
-        while p < low:
+    used = set()
+    for p in sorted(v):
+        p = _force_into_range_by_octaves(p, ABS_NOTE_FLOOR, ABS_NOTE_CEIL)
+
+        # de-dupe by moving up an octave if needed
+        while p in used and (p + 12) <= ABS_NOTE_CEIL:
             p += 12
-        while p > high:
+        while p in used and (p - 12) >= ABS_NOTE_FLOOR:
             p -= 12
-        out.append(int(p))
-    return sorted(out)
+
+        used.add(p)
+        out.append(p)
+
+    out = sorted(out)
+
+    # Final guarantee
+    if out and min(out) < ABS_NOTE_FLOOR:
+        # push everything up together until ok
+        shift = 0
+        while min(out) + shift < ABS_NOTE_FLOOR:
+            shift += 12
+        out = [p + shift for p in out]
+        out = [min(p, ABS_NOTE_CEIL) for p in out]
+        out = sorted(set(out))
+        out = sorted([_force_into_range_by_octaves(p, ABS_NOTE_FLOOR, ABS_NOTE_CEIL) for p in out])
+
+    return out
 
 
-def span(notes: List[int]) -> int:
+def _prefer_bass_zone(notes: List[int]) -> List[int]:
+    """
+    Makes the *lowest* note (bass) land in the preferred zone when possible.
+    Shifts the whole chord together by octaves to keep shape.
+    """
     if not notes:
-        return 0
-    return int(max(notes) - min(notes))
+        return notes
+
+    v = sorted(notes)
+    b = min(v)
+
+    # Choose octave shift that brings bass closest to the preferred range center
+    pref_center = (BASS_PREF_MIN + BASS_PREF_MAX) / 2.0
+    options = []
+    for k in range(-4, 5):
+        vv = [p + 12 * k for p in v]
+        if min(vv) < ABS_NOTE_FLOOR or max(vv) > ABS_NOTE_CEIL:
+            continue
+        bb = min(vv)
+        if bb < BASS_HARD_MIN or bb > BASS_HARD_MAX:
+            continue
+        dist = 0.0
+        # heavily favor bass inside preferred window
+        if bb < BASS_PREF_MIN:
+            dist += (BASS_PREF_MIN - bb) * 25.0
+        elif bb > BASS_PREF_MAX:
+            dist += (bb - BASS_PREF_MAX) * 25.0
+        dist += abs(bb - pref_center) * 2.0
+        options.append((dist, vv))
+
+    if options:
+        options.sort(key=lambda x: x[0])
+        v = options[0][1]
+
+    return _sanitize_notes_strict(v)
 
 
-def center(notes: List[int]) -> float:
-    if not notes:
-        return 60.0
-    return (min(notes) + max(notes)) / 2.0
-
-
-def chord_to_midi(chord_name: str) -> List[int]:
-    prof = get_voicing_profile()
-    low = int(prof["global_low"])
-    high = int(prof["global_high"])
-
+def chord_to_midi(chord_name: str, base_oct=3) -> List[int]:
+    """
+    Raw chord tones, but registered safely.
+    The lowest note will be kept in the bass zone.
+    """
     root, rest, bass = parse_root_and_bass(chord_name)
+
     if root not in NOTE_TO_SEMITONE:
         raise ValueError(f"Bad root '{root}' in '{chord_name}'")
 
@@ -1357,53 +1455,41 @@ def chord_to_midi(chord_name: str) -> List[int]:
         raise ValueError(f"Unrecognized chord quality: {rest}")
 
     root_pc = NOTE_TO_SEMITONE[root]
-
-    # Anchor root near bass_center for consistent RAW register
-    root_midi = 12 * 3 + root_pc  # around C2/C3 region
-
-    # Pull into a window around bass_center
-    bc = int(prof["bass_center"])
-    while root_midi < bc - 6:
-        root_midi += 12
-    while root_midi > bc + 6:
-        root_midi -= 12
+    # Start root around base_oct, but final register is decided by _prefer_bass_zone
+    root_midi = 12 * (base_oct + 1) + root_pc
 
     tones = QUAL_TO_INTERVALS[quality]
-    notes = []
-    for iv in tones:
-        p = root_midi + iv
-        while p < low:
-            p += 12
-        while p > high:
-            p -= 12
-        notes.append(p)
+    notes = [root_midi + iv for iv in tones]
 
+    # Slash bass support if it ever appears
     if bass:
         if bass not in NOTE_TO_SEMITONE:
             raise ValueError(f"Bad slash bass '{bass}' in '{chord_name}'")
         bass_pc = NOTE_TO_SEMITONE[bass]
-        # Place slash bass under chord, then clamp
-        bass_midi = 12 * 3 + bass_pc
-        while bass_midi > min(notes):
-            bass_midi -= 12
+        bass_midi = 12 * (base_oct + 1) + bass_pc
         notes = [bass_midi] + notes
 
-    notes = clamp_to_range(notes, low, high)
-    return sorted(set(int(x) for x in notes))
+    notes = _sanitize_notes_strict(notes)
+    notes = _prefer_bass_zone(notes)
+    return notes
+
+
+def span(notes: List[int]) -> int:
+    return int(max(notes) - min(notes)) if notes else 0
+
+
+def center(notes: List[int]) -> float:
+    return (min(notes) + max(notes)) / 2.0 if notes else TARGET_CENTER
+
+
+def adjacent_gaps(notes: List[int]) -> List[int]:
+    v = sorted(notes)
+    return [v[i + 1] - v[i] for i in range(len(v) - 1)] if len(v) >= 2 else []
 
 
 def semitone_pairs(notes: List[int]):
     s = sorted(set(notes))
-    pairs = []
-    for i in range(len(s) - 1):
-        if (s[i + 1] - s[i]) == 1:
-            pairs.append((s[i], s[i + 1]))
-    return pairs
-
-
-# Glue behavior (semitone clusters)
-GLUE_LOW_CUTOFF = 48
-GLUE_PROBABILITY = 0.30
+    return [(s[i], s[i + 1]) for i in range(len(s) - 1) if (s[i + 1] - s[i]) == 1]
 
 
 def glue_ok(notes: List[int], rng: random.Random) -> bool:
@@ -1421,28 +1507,15 @@ def shared_pitch_count(a: List[int], b: List[int]) -> int:
 
 
 def is_min11_name(ch_name: str) -> bool:
-    s = ch_name.replace(" ", "").lower()
-    return ("min11" in s)
-
-
-MAX_SHARED_DEFAULT = 2
-MAX_SHARED_MIN11 = 3
+    return ("min11" in ch_name.replace(" ", "").lower())
 
 
 def max_shared_allowed(prev_name: str, cur_name: str) -> int:
     return MAX_SHARED_MIN11 if (is_min11_name(prev_name) or is_min11_name(cur_name)) else MAX_SHARED_DEFAULT
 
 
-ENFORCE_NOT_RAW_WHEN_VOICING = True
-RAW_PENALTY = 1800
-
-
-def is_raw_shape(v: List[int], raw_notes: List[int], low: int, high: int) -> bool:
-    return sorted(v) == sorted(clamp_to_range(raw_notes, low, high))
-
-
-ALLOW_RESOLVE_TO_THIRD = True
-ALLOW_RESOLVE_TO_FIFTH = False
+def is_raw_shape(v: List[int], raw_notes: List[int]) -> bool:
+    return sorted(v) == sorted(raw_notes)
 
 
 def allowed_resolution_pcs(key: str) -> set:
@@ -1471,9 +1544,8 @@ def bad_cross_semitone_indices(prev_notes: List[int], cur_notes: List[int], allo
     return bad
 
 
-def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set, low: int, high: int, max_iters: int = 8) -> List[int]:
+def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_target_pcs: set, max_iters: int = 8) -> List[int]:
     v = sorted(list(cur_notes))
-
     for _ in range(max_iters):
         bad_idxs = bad_cross_semitone_indices(prev_notes, v, allowed_target_pcs)
         if not bad_idxs:
@@ -1483,80 +1555,50 @@ def repair_cross_semitones(prev_notes: List[int], cur_notes: List[int], allowed_
         for idx in bad_idxs:
             n = v[idx]
             options = []
-
             for delta in (+12, -12):
                 n2 = n + delta
-                if n2 < low or n2 > high:
+                if n2 < ABS_NOTE_FLOOR or n2 > ABS_NOTE_CEIL:
                     continue
                 if n2 in v:
                     continue
-
                 test = v[:]
                 test[idx] = n2
                 test = sorted(test)
-
                 remaining = len(bad_cross_semitone_indices(prev_notes, test, allowed_target_pcs))
-                options.append((remaining, abs(center(test) - center(v)), span(test), test))
-
+                options.append((remaining, abs(center(test) - TARGET_CENTER), span(test), abs(min(test) - ((BASS_PREF_MIN + BASS_PREF_MAX) / 2.0)), test))
             if options:
-                options.sort(key=lambda x: (x[0], x[1], x[2]))
-                v = options[0][3]
+                options.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
+                v = options[0][4]
                 changed_any = True
 
         if not changed_any:
             break
 
-    return v
+    return _sanitize_notes_strict(v)
 
 
-def adjacent_gaps(notes: List[int]) -> List[int]:
-    v = sorted(notes)
-    if len(v) < 2:
-        return []
-    return [v[i + 1] - v[i] for i in range(len(v) - 1)]
-
-
-def spacing_penalty(notes: List[int], prof: dict) -> float:
+def spacing_penalty(notes: List[int]) -> float:
     gaps = adjacent_gaps(notes)
-    if not gaps:
-        return 0.0
-
     pen = 0.0
     for g in gaps:
-        if g < prof["min_adj_gap"]:
-            pen += (prof["min_adj_gap"] - g) * 900.0
-        if g > prof["max_adj_gap"]:
-            pen += (g - prof["max_adj_gap"]) * 420.0
-        if g > prof["hard_max_adj_gap"]:
-            pen += (g - prof["hard_max_adj_gap"]) * 1200.0
+        if g < MIN_ADJ_GAP:
+            pen += (MIN_ADJ_GAP - g) * 900.0
+        if g > MAX_ADJ_GAP:
+            pen += (g - MAX_ADJ_GAP) * 420.0
+        if g > HARD_MAX_ADJ_GAP:
+            pen += (g - HARD_MAX_ADJ_GAP) * 1200.0
     return pen
 
 
-def bass_penalty(prev: Optional[List[int]], cur: List[int], prof: dict) -> float:
-    if not cur:
+def bass_penalty(prev: Optional[List[int]], cur: List[int]) -> float:
+    if not prev:
         return 0.0
-
-    b = min(cur)
-    pen = 0.0
-
-    if b < prof["bass_hard_min"]:
-        pen += (prof["bass_hard_min"] - b) * 700.0
-    if b > prof["bass_hard_max"]:
-        pen += (b - prof["bass_hard_max"]) * 700.0
-
-    if b < prof["bass_soft_min"]:
-        pen += (prof["bass_soft_min"] - b) * 140.0
-    if b > prof["bass_soft_max"]:
-        pen += (b - prof["bass_soft_max"]) * 140.0
-
-    pen += abs(b - prof["bass_center"]) * 5.0
-
-    if prev:
-        jump = abs(min(prev) - b)
-        if jump > prof["max_bass_jump"]:
-            pen += (jump - prof["max_bass_jump"]) * 360.0
-
-    return pen
+    b0 = min(prev)
+    b1 = min(cur)
+    jump = abs(b1 - b0)
+    if jump <= MAX_BASS_JUMP:
+        return 0.0
+    return (jump - MAX_BASS_JUMP) * 260.0
 
 
 def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
@@ -1566,10 +1608,7 @@ def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
         return 0.0
 
     if len(p) != len(c):
-        total = 0.0
-        for x in c:
-            total += min(abs(x - y) for y in p)
-        return float(total)
+        return float(sum(min(abs(x - y) for y in p) for x in c))
 
     import itertools
     best = None
@@ -1582,42 +1621,57 @@ def _min_assignment_move(prev: List[int], cur: List[int]) -> float:
     return float(best if best is not None else 0.0)
 
 
-def generate_voicing_candidates(raw_notes: List[int], low: int, high: int) -> List[List[int]]:
-    base = sorted(set(clamp_to_range(raw_notes, low, high)))
+def generate_voicing_candidates(raw_notes: List[int]) -> List[List[int]]:
+    """
+    Candidate generation is now *range-aware*:
+    - Never generate anything below ABS_NOTE_FLOOR
+    - Never generate anything above ABS_NOTE_CEIL
+    - Prefer keeping chord in a coherent register
+    """
+    base = _sanitize_notes_strict(raw_notes)
     n = len(base)
     if n == 0:
         return []
 
     candidates = set()
 
-    def add_candidate(v):
-        v = sorted(set(clamp_to_range(v, low, high)))
-        if len(v) == n:
-            candidates.add(tuple(v))
+    def add(v):
+        v = _sanitize_notes_strict(v)
+        if len(v) != n:
+            return
+        # Hard reject if bass is out of hard clamp
+        b = min(v)
+        if b < BASS_HARD_MIN or b > BASS_HARD_MAX:
+            return
+        candidates.add(tuple(v))
 
-    add_candidate(base)
+    # Start from base, then octave-register it into preferred bass zone
+    add(_prefer_bass_zone(base))
 
+    # Inversions (but keep registered)
     inv = base[:]
     for _ in range(n - 1):
         inv = inv[1:] + [inv[0] + 12]
-        add_candidate(inv)
+        add(_prefer_bass_zone(inv))
 
+    # Controlled “spread” moves (only mild, avoids crazy gaps)
     for k in range(1, n):
         v1 = base[:]
         for i in range(n - k, n):
             v1[i] += 12
-        add_candidate(v1)
+        add(_prefer_bass_zone(v1))
 
         v2 = base[:]
         for i in range(0, k):
             v2[i] -= 12
-        add_candidate(v2)
+        add(_prefer_bass_zone(v2))
 
+    # Whole-chord octave shifts, limited
     for shift in (-12, 0, 12):
-        add_candidate([x + shift for x in base])
+        add(_prefer_bass_zone([x + shift for x in base]))
 
     out = [list(c) for c in candidates]
-    return out if out else [base]
+    return out if out else [_prefer_bass_zone(base)]
 
 
 def choose_best_voicing(
@@ -1628,26 +1682,20 @@ def choose_best_voicing(
     key_name: str,
     rng: random.Random
 ) -> List[int]:
-    prof = get_voicing_profile()
-    low = int(prof["global_low"])
-    high = int(prof["global_high"])
+    raw_clean = _prefer_bass_zone(_sanitize_notes_strict(raw_notes))
+    cands = generate_voicing_candidates(raw_clean)
 
-    raw_clamped = clamp_to_range(raw_notes, low, high)
-
-    cands = generate_voicing_candidates(raw_notes, low, high)
-
+    # Glue filter
     filtered = [v for v in cands if glue_ok(v, rng)]
     if filtered:
         cands = filtered
 
+    # Repair cross-semitones
     if prev_voicing is not None:
         allowed_pcs = allowed_resolution_pcs(key_name)
-        cands = [repair_cross_semitones(prev_voicing, v, allowed_pcs, low, high) for v in cands]
+        cands = [repair_cross_semitones(prev_voicing, v, allowed_pcs) for v in cands]
 
-    filtered = [v for v in cands if glue_ok(v, rng)]
-    if filtered:
-        cands = filtered
-
+    # Shared tone cap
     if prev_voicing is not None:
         limit = max_shared_allowed(prev_name, cur_name)
         filtered = [v for v in cands if shared_pitch_count(prev_voicing, v) <= limit]
@@ -1655,52 +1703,56 @@ def choose_best_voicing(
             cands = filtered
 
     def cost(v: List[int]) -> float:
-        v = sorted(v)
+        v = _prefer_bass_zone(_sanitize_notes_strict(v))
 
-        reg_pen = abs(center(v) - prof["target_center"]) * 120.0
+        # Absolute safety penalties (should never happen, but keep as guard)
+        if min(v) < ABS_NOTE_FLOOR:
+            return 1e12
 
+        # Bass preference penalty
+        b = min(v)
+        bass_pref_pen = 0.0
+        if b < BASS_PREF_MIN:
+            bass_pref_pen += (BASS_PREF_MIN - b) * 300.0
+        elif b > BASS_PREF_MAX:
+            bass_pref_pen += (b - BASS_PREF_MAX) * 300.0
+
+        # Register and span
+        reg_pen = abs(center(v) - TARGET_CENTER) * 120.0
         sp = span(v)
-        span_pen = abs(sp - prof["ideal_span"]) * 80.0
-        if sp < prof["min_span"]:
-            span_pen += (prof["min_span"] - sp) * 700.0
-        if sp > prof["max_span"]:
-            span_pen += (sp - prof["max_span"]) * 220.0
 
-        space_pen = spacing_penalty(v, prof)
+        span_pen = abs(sp - IDEAL_SPAN) * 80.0
+        if sp < MIN_SPAN:
+            span_pen += (MIN_SPAN - sp) * 1200.0
+        if sp > MAX_SPAN:
+            span_pen += (sp - MAX_SPAN) * 800.0
 
-        move_pen = 0.0 if prev_voicing is None else _min_assignment_move(prev_voicing, v) * 3.2
+        # Spacing and motion
+        space_pen = spacing_penalty(v)
+        move_pen = 0.0 if prev_voicing is None else _min_assignment_move(prev_voicing, v) * 3.0
+        b_pen = bass_penalty(prev_voicing, v)
 
-        b_pen = bass_penalty(prev_voicing, v, prof)
+        # Avoid exact repeats
+        repeat_pen = 900.0 if (prev_voicing is not None and sorted(prev_voicing) == sorted(v)) else 0.0
 
-        repeat_pen = 900.0 if (prev_voicing is not None and sorted(prev_voicing) == v) else 0.0
-
+        # Avoid “raw” if desired
         raw_pen = 0.0
-        if ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clamped, low, high):
+        if ENFORCE_NOT_RAW_WHEN_VOICING and is_raw_shape(v, raw_clean):
             raw_pen = RAW_PENALTY
 
-        cross_pen = 0.0
-        if prev_voicing is not None:
-            allowed_pcs = allowed_resolution_pcs(key_name)
-            bad_left = len(bad_cross_semitone_indices(prev_voicing, v, allowed_pcs))
-            cross_pen = bad_left * 25000.0
-
-        # Prevent sudden whole-chord register jumps
-        reg_jump_pen = 0.0
-        if prev_voicing is not None:
-            jump = abs(center(v) - center(prev_voicing))
-            if jump > prof["max_register_jump"]:
-                reg_jump_pen = (jump - prof["max_register_jump"]) * 140.0
-
-        return reg_pen + span_pen + space_pen + move_pen + b_pen + repeat_pen + raw_pen + cross_pen + reg_jump_pen
+        return bass_pref_pen + reg_pen + span_pen + space_pen + move_pen + b_pen + repeat_pen + raw_pen
 
     cands.sort(key=cost)
-    best = sorted(cands[0])
+    best = cands[0] if cands else raw_clean
+    best = _prefer_bass_zone(_sanitize_notes_strict(best))
     return best
 
 
+
 # =========================================================
-# EXPORTER
+# EXPORTER (PATCH 2: hard floor + bass zone + safe write)
 # =========================================================
+
 def safe_token(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_#-]+", "", str(s))
 
@@ -1709,28 +1761,98 @@ def chord_list_token(chords):
     return "-".join(safe_token(c) for c in chords)
 
 
+def _ensure_floor_and_bass_zone(notes: List[int]) -> List[int]:
+    """
+    Absolute exporter safety. Assumes the voicing section defines:
+      - ABS_NOTE_FLOOR
+      - _sanitize_notes_strict
+      - _prefer_bass_zone
+    """
+    v = _sanitize_notes_strict(notes)
+    v = _prefer_bass_zone(v)
+
+    # Final, absolute guarantee
+    if v and min(v) < ABS_NOTE_FLOOR:
+        while min(v) < ABS_NOTE_FLOOR:
+            v = [p + 12 for p in v]
+        v = _sanitize_notes_strict(v)
+        v = _prefer_bass_zone(v)
+
+    return v
+
+
+def _reduce_bass_jump(prev_notes: Optional[List[int]], cur_notes: List[int]) -> List[int]:
+    """
+    If bass jumps too much, octave-shift the whole chord to reduce jump.
+    Uses MAX_BASS_JUMP and ABS_NOTE_FLOOR/ABS_NOTE_CEIL from voicing section.
+    """
+    if not prev_notes:
+        return cur_notes
+
+    prev_b = min(prev_notes) if prev_notes else None
+    cur_b = min(cur_notes) if cur_notes else None
+    if prev_b is None or cur_b is None:
+        return cur_notes
+
+    if abs(cur_b - prev_b) <= MAX_BASS_JUMP:
+        return cur_notes
+
+    candidates = []
+    for k in (-24, -12, 0, 12, 24):
+        vv = [p + k for p in cur_notes]
+        vv = _ensure_floor_and_bass_zone(vv)
+        if vv and min(vv) >= ABS_NOTE_FLOOR and max(vv) <= ABS_NOTE_CEIL:
+            candidates.append((abs(min(vv) - prev_b), vv))
+
+    if not candidates:
+        return cur_notes
+
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1]
+
+
 def validate_progressions(progressions):
     if not progressions:
         raise ValueError("No progressions generated.")
+
     for i, item in enumerate(progressions, start=1):
         if len(item) != 3:
             raise ValueError(f"Progression {i} must be (chords, durations, key).")
+
         chords, durations, key_name = item
+
         if len(chords) != len(durations):
             raise ValueError(f"Progression {i}: chords/durations mismatch.")
+
         bars = sum(durations)
         if bars not in (4, 8, 16):
             raise ValueError(f"Progression {i}: invalid bar sum {bars}.")
+
+        # Validate chord parsing + enforce exporter floor immediately
         for ch in chords:
-            chord_to_midi(ch)
+            v = chord_to_midi(ch)
+            v = _ensure_floor_and_bass_zone(v)
+            if not v:
+                raise ValueError(f"Progression {i}: chord produced empty notes: {ch}")
+            if min(v) < ABS_NOTE_FLOOR:
+                raise ValueError(f"Progression {i}: chord below floor after sanitize: {ch}")
 
 
-def write_progression_midi(out_root: str, idx: int, chords, durations, key_name: str, revoice: bool, seed: int):
+def write_progression_midi(
+    out_root: str,
+    idx: int,
+    chords,
+    durations,
+    key_name: str,
+    revoice: bool,
+    seed: int
+):
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
 
-    raw = [chord_to_midi(ch) for ch in chords]
+    # RAW registered safely already (your chord_to_midi now registers into zone)
+    raw = [_ensure_floor_and_bass_zone(chord_to_midi(ch)) for ch in chords]
 
     if revoice:
         voiced = []
@@ -1744,23 +1866,47 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
             else:
                 v = choose_best_voicing(prev_v, prev_name, ch_name, notes, key_name, rng)
 
+            v = _ensure_floor_and_bass_zone(v)
+            v = _reduce_bass_jump(prev_v, v)
+
             voiced.append(v)
             prev_v = v
             prev_name = ch_name
 
         out_notes = voiced
     else:
-        out_notes = raw
+        # Even raw needs the same progression-level jump smoothing
+        safe = []
+        prev_v = None
+        for notes in raw:
+            v = _ensure_floor_and_bass_zone(notes)
+            v = _reduce_bass_jump(prev_v, v)
+            safe.append(v)
+            prev_v = v
+        out_notes = safe
+
+    # Absolute final pass, just in case
+    final_notes = []
+    prev_v = None
+    for v in out_notes:
+        v = _ensure_floor_and_bass_zone(v)
+        v = _reduce_bass_jump(prev_v, v)
+        v = _ensure_floor_and_bass_zone(v)
+        final_notes.append(v)
+        prev_v = v
 
     t = 0.0
-    for notes, bars in zip(out_notes, durations):
+    for notes, bars in zip(final_notes, durations):
         dur = bars * SEC_PER_BAR
         for p in sorted(set(notes)):
+            # Final hard floor at write-time
+            if int(p) < int(ABS_NOTE_FLOOR):
+                continue
             inst.notes.append(pretty_midi.Note(
                 velocity=int(VELOCITY),
                 pitch=int(p),
-                start=t,
-                end=t + dur
+                start=float(t),
+                end=float(t + dur)
             ))
         t += dur
 
@@ -1775,31 +1921,45 @@ def write_progression_midi(out_root: str, idx: int, chords, durations, key_name:
     midi.write(os.path.join(out_dir, filename))
 
 
-def write_single_chord_midi(out_root: str, chord_name: str, revoice: bool, length_bars=4, seed: int = 1337):
+def write_single_chord_midi(
+    out_root: str,
+    chord_name: str,
+    revoice: bool,
+    length_bars: int = 4,
+    seed: int = 1337
+):
     dur = length_bars * SEC_PER_BAR
     midi = pretty_midi.PrettyMIDI(initial_tempo=BPM)
     midi.time_signature_changes = [pretty_midi.TimeSignature(TIME_SIG[0], TIME_SIG[1], 0)]
     inst = pretty_midi.Instrument(program=0)
 
-    raw = chord_to_midi(chord_name)
+    raw = _ensure_floor_and_bass_zone(chord_to_midi(chord_name))
+
     if revoice:
         rng = random.Random(seed)
         notes = choose_best_voicing(None, chord_name, chord_name, raw, "C", rng)
+        notes = _ensure_floor_and_bass_zone(notes)
     else:
         notes = raw
 
+    # Last hard guard
+    notes = _ensure_floor_and_bass_zone(notes)
+
     for p in sorted(set(notes)):
+        if int(p) < int(ABS_NOTE_FLOOR):
+            continue
         inst.notes.append(pretty_midi.Note(
             velocity=int(VELOCITY),
             pitch=int(p),
             start=0.0,
-            end=dur
+            end=float(dur)
         ))
 
     midi.instruments.append(inst)
 
     chords_dir = os.path.join(out_root, "Chords")
     os.makedirs(chords_dir, exist_ok=True)
+
     rv_tag = "_Revoiced" if revoice else ""
     midi.write(os.path.join(chords_dir, f"{safe_token(chord_name)}{rv_tag}.mid"))
 
@@ -1822,11 +1982,25 @@ def build_pack(progressions, revoice: bool, seed: int) -> tuple[str, int, str]:
 
     unique_chords = set()
     for i, (chords, durations, key_name) in enumerate(progressions, start=1):
-        write_progression_midi(prog_root, i, chords, durations, key_name, revoice=revoice, seed=seed)
+        write_progression_midi(
+            prog_root,
+            i,
+            chords,
+            durations,
+            key_name,
+            revoice=bool(revoice),
+            seed=int(seed)
+        )
         unique_chords.update(chords)
 
     for ch in sorted(unique_chords):
-        write_single_chord_midi(prog_root, ch, revoice=revoice, length_bars=4, seed=seed + 999)
+        write_single_chord_midi(
+            prog_root,
+            ch,
+            revoice=bool(revoice),
+            length_bars=4,
+            seed=int(seed) + 999
+        )
 
     base = DOWNLOAD_NAME[:-4] if DOWNLOAD_NAME.lower().endswith(".zip") else DOWNLOAD_NAME
     final_zip_name = f"{base}_Revoiced.zip" if revoice else DOWNLOAD_NAME
