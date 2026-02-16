@@ -1189,7 +1189,7 @@ VOICING_PROFILES = {
         "bass_soft_min": 40,   # preferred bass zone (E2)
         "bass_soft_max": 52,   # (E3)
         "bass_hard_min": 36,   # hard floor (C2)
-        "bass_hard_max": 55,   # hard ceiling (G3-ish)
+        "bass_hard_max": 60,   # hard ceiling (G3-ish)
         "bass_center": 46,     # gravity center for bass (Bb2)
         "max_bass_jump": 7,    # semitones
 
