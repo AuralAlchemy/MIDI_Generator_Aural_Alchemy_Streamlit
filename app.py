@@ -1746,11 +1746,23 @@ def choose_best_voicing(
     best = cands[0] if cands else raw_clean
     best = _prefer_bass_zone(_sanitize_notes_strict(best))
     return best
+# =========================================================
+# GLOBAL TIMING SETTINGS
+# =========================================================
+BPM = 85
+TIME_SIG = (4, 4)
+BASE_OCTAVE = 3
+VELOCITY = 100
+
+def sec_per_bar(bpm=BPM, ts=TIME_SIG):
+    return (60.0 / bpm) * ts[0]
+
+SEC_PER_BAR = sec_per_bar()
 
 
 
 # =========================================================
-# EXPORTER (PATCH 2: hard floor + bass zone + safe write)
+# EXPORTER (hard floor + bass zone + safe write)
 # =========================================================
 
 def safe_token(s: str) -> str:
