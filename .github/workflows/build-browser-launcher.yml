@@ -1,4 +1,4 @@
-name: Build Desktop Apps (Browser Launcher)
+name: Build Browser Launcher
 
 on:
   workflow_dispatch:
@@ -21,14 +21,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build Windows EXE
+      - name: Build Windows launcher
         run: |
-          pyinstaller --noconfirm --name "AuralAlchemy MIDI Generator" --icon assets/icon.ico --add-data "app.py;." launcher.py
+          pyinstaller --noconfirm `
+            --name "AuralAlchemy MIDI Generator" `
+            --icon assets/icon.ico `
+            --add-data "app.py;." `
+            --add-data ".streamlit;.streamlit" `
+            --collect-all streamlit `
+            --collect-submodules pretty_midi `
+            --collect-submodules mido `
+            launcher.py
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AuralAlchemy-Windows
+          name: AuralAlchemy-MIDI-Generator-windows
           path: dist/AuralAlchemy MIDI Generator
 
   build-macos:
@@ -48,17 +56,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build macOS App
+      - name: Build macOS launcher
         run: |
-          pyinstaller --noconfirm --windowed --name "AuralAlchemy MIDI Generator" --icon assets/icon.icns --add-data "app.py:." launcher.py
+          pyinstaller --noconfirm \
+            --windowed \
+            --name "AuralAlchemy MIDI Generator" \
+            --icon assets/icon.icns \
+            --add-data "app.py:." \
+            --add-data ".streamlit:.streamlit" \
+            --collect-all streamlit \
+            --collect-submodules pretty_midi \
+            --collect-submodules mido \
+            launcher.py
 
       - name: Zip macOS app
         run: |
           cd dist
-          zip -r AuralAlchemy-Mac.zip "AuralAlchemy MIDI Generator.app"
+          zip -r AuralAlchemy-MIDI-Generator-mac.zip "AuralAlchemy MIDI Generator.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AuralAlchemy-Mac
-          path: dist/AuralAlchemy-Mac.zip
+          name: AuralAlchemy-MIDI-Generator-mac
+          path: dist/AuralAlchemy-MIDI-Generator-mac.zip
