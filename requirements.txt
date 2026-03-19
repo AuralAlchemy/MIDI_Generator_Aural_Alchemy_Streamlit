@@ -5,5 +5,4 @@ mido
 numpy
 pandas
 pyinstaller
-streamlit-desktop-app
 pillow
