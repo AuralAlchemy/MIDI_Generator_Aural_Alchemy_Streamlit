@@ -22,18 +22,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build Windows app
+      - name: Build Windows app from spec
         shell: powershell
         run: |
-          pyinstaller --noconfirm `
-            --name "AuralAlchemy MIDI Generator" `
-            --icon assets/icon.ico `
-            --add-data "app.py;." `
-            --add-data ".streamlit;.streamlit" `
-            --collect-all streamlit `
-            --collect-submodules pretty_midi `
-            --collect-submodules mido `
-            launcher.py
+          pyinstaller --noconfirm --clean auralalchemy.spec
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -58,23 +50,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build macOS app
+      - name: Patch mac icon in spec
         run: |
-          pyinstaller --noconfirm \
-            --windowed \
-            --name "AuralAlchemy MIDI Generator" \
-            --icon assets/icon.icns \
-            --add-data "app.py:." \
-            --add-data ".streamlit:.streamlit" \
-            --collect-all streamlit \
-            --collect-submodules pretty_midi \
-            --collect-submodules mido \
-            launcher.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("auralchemy.spec")
+          s = p.read_text()
+          s = s.replace('icon="assets/icon.ico"', 'icon="assets/icon.icns"')
+          s = s.replace('console=True', 'console=False')
+          p.write_text(s)
+          PY
+
+      - name: Build macOS app from spec
+        run: |
+          pyinstaller --noconfirm --clean auralalchemy.spec
 
       - name: Zip macOS app
         run: |
           cd dist
-          zip -r AuralAlchemy-MIDI-Generator-mac.zip "AuralAlchemy MIDI Generator.app"
+          zip -r AuralAlchemy-MIDI-Generator-mac.zip "AuralAlchemy MIDI Generator"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
