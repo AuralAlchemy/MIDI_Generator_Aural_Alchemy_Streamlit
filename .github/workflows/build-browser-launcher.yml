@@ -50,25 +50,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Patch mac icon in spec
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("auralchemy.spec")
-          s = p.read_text()
-          s = s.replace('icon="assets/icon.ico"', 'icon="assets/icon.icns"')
-          s = s.replace('console=True', 'console=False')
-          p.write_text(s)
-          PY
-
       - name: Build macOS app from spec
         run: |
-          pyinstaller --noconfirm --clean auralalchemy.spec
+          pyinstaller --noconfirm --clean auralalchemy_mac.spec
 
       - name: Zip macOS app
         run: |
           cd dist
-          zip -r AuralAlchemy-MIDI-Generator-mac.zip "AuralAlchemy MIDI Generator"
+          zip -r AuralAlchemy-MIDI-Generator-mac.zip "AuralAlchemy MIDI Generator.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
