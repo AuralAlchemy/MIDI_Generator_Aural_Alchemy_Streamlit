@@ -1,93 +1,56 @@
-import atexit
 import os
-import signal
-import socket
-import subprocess
 import sys
 import time
+import socket
+import threading
 import webbrowser
 from pathlib import Path
 
-process = None
 
-
-def is_port_open(host: str, port: int) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=1):
-            return True
-    except OSError:
-        return False
-
-
-def wait_for_server(host: str, port: int, timeout: int = 45) -> bool:
+def wait_for_server(host="127.0.0.1", port=8501, timeout=45):
     start = time.time()
     while time.time() - start < timeout:
-        if is_port_open(host, port):
-            return True
-        time.sleep(0.5)
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(0.5)
     return False
 
 
-def cleanup() -> None:
-    global process
-    if process and process.poll() is None:
-        try:
-            if sys.platform.startswith("win"):
-                process.terminate()
-            else:
-                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        except Exception:
-            pass
+def open_browser_when_ready():
+    if wait_for_server():
+        webbrowser.open("http://127.0.0.1:8501")
+    else:
+        print("ERROR: Streamlit server did not start in time.")
 
 
-def main() -> None:
-    global process
-    atexit.register(cleanup)
-
-    host = "127.0.0.1"
-    port = 8501
-    url = f"http://{host}:{port}"
+def main():
+    os.environ["BROWSER"] = "none"
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
 
     base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     app_path = base_dir / "app.py"
-    streamlit_config_dir = base_dir / ".streamlit"
 
-    env = os.environ.copy()
-    env["BROWSER"] = "none"
-    env["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+    if not app_path.exists():
+        print(f"ERROR: app.py not found at {app_path}")
+        sys.exit(1)
 
-    if streamlit_config_dir.exists():
-        env["STREAMLIT_CONFIG_DIR"] = str(streamlit_config_dir)
+    threading.Thread(target=open_browser_when_ready, daemon=True).start()
 
-    cmd = [
-        sys.executable,
-        "-m",
+    from streamlit.web import cli as stcli
+
+    sys.argv = [
         "streamlit",
         "run",
         str(app_path),
-        "--server.headless",
-        "true",
-        "--browser.gatherUsageStats",
-        "false",
-        "--server.address",
-        host,
-        "--server.port",
-        str(port),
+        "--server.headless=true",
+        "--browser.gatherUsageStats=false",
+        "--server.address=127.0.0.1",
+        "--server.port=8501",
     ]
 
-    if sys.platform.startswith("win"):
-        creationflags = 0
-        process = subprocess.Popen(cmd, env=env, creationflags=creationflags)
-    else:
-        process = subprocess.Popen(cmd, env=env, preexec_fn=os.setsid)
-
-    if wait_for_server(host, port, timeout=45):
-        webbrowser.open(url)
-        process.wait()
-    else:
-        print("ERROR: Streamlit server did not start in time.")
-        cleanup()
-        sys.exit(1)
+    sys.exit(stcli.main())
 
 
 if __name__ == "__main__":
