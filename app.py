@@ -353,11 +353,105 @@ div[data-testid="stMarkdownContainer"] > p:empty { display: none !important; }
   min-width: 2.6em !important;
   text-align: center !important;
 }
+/* =========================================================
+   FINAL WINDOWS / PACKAGED APP OVERRIDES
+========================================================= */
+
+/* Force text to stay fully visible */
+html, body, .stApp, .block-container,
+p, label, span, div, small,
+h1, h2, h3, h4, h5, h6,
+[data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"] *,
+[data-testid="stText"],
+[data-testid="stWidgetLabel"],
+[data-testid="stWidgetLabel"] * {
+  opacity: 1 !important;
+}
+
+/* Make subtitle and normal labels brighter */
+.aa-subtitle,
+label,
+p,
+small,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stWidgetLabel"] {
+  color: rgba(255,255,255,0.95) !important;
+  opacity: 1 !important;
+}
+
+/* Strengthen title rendering in packaged app */
+.aa-title,
+.aa-title-second {
+  text-shadow:
+    0 2px 10px rgba(0,0,0,0.35),
+    0 0 12px rgba(0,229,255,0.08) !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+/* Force slider text, numbers, min/max labels to white */
+[data-testid="stSlider"],
+[data-testid="stSlider"] *,
+[data-baseweb="slider"],
+[data-baseweb="slider"] * {
+  color: rgba(255,255,255,0.96) !important;
+  opacity: 1 !important;
+}
+
+/* Force cyan slider thumb */
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="slider"]{
+  background: #00E5FF !important;
+  border: 1px solid rgba(0,229,255,0.42) !important;
+  box-shadow:
+    0 0 0 6px rgba(0,229,255,0.12),
+    0 10px 28px rgba(0,229,255,0.24) !important;
+}
+
+/* Force active slider track cyan */
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] > div{
+  background: rgba(0,229,255,0.75) !important;
+}
+
+/* Force inactive slider track pale */
+[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] > div + div{
+  background: rgba(255,255,255,0.14) !important;
+}
+
+/* Kill random browser accent colors like orange */
+* {
+  accent-color: #00E5FF !important;
+}
+
+/* Inputs brighter and less washed out */
+input, textarea {
+  color: rgba(255,255,255,0.96) !important;
+  background: rgba(255,255,255,0.96) !important;
+}
+
+/* Expander headers brighter */
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] summary *{
+  color: rgba(255,255,255,0.94) !important;
+  opacity: 1 !important;
+}
+
+/* Buttons keep solid text */
+.stButton>button,
+.stButton>button * {
+  color: rgba(255,255,255,0.97) !important;
+  opacity: 1 !important;
+}
+
+/* Slightly strengthen hero glass so text pops more */
+.aa-hero {
+  background: linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03)) !important;
+  border: 1px solid rgba(255,255,255,0.13) !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
 )
-
 
 # =========================================================
 # Geometry SVG overlay (BASE64 DATA URI)
