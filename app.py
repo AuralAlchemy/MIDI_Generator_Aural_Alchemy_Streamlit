@@ -354,10 +354,10 @@ div[data-testid="stMarkdownContainer"] > p:empty { display: none !important; }
   text-align: center !important;
 }
 /* =========================================================
-   FINAL WINDOWS / PACKAGED APP OVERRIDES
+   FINAL WINDOWS / PACKAGED APP OVERRIDES (CLEAN + FIXED)
 ========================================================= */
 
-/* Force text to stay fully visible */
+/* ---------- TEXT VISIBILITY FIX ---------- */
 html, body, .stApp, .block-container,
 p, label, span, div, small,
 h1, h2, h3, h4, h5, h6,
@@ -369,7 +369,7 @@ h1, h2, h3, h4, h5, h6,
   opacity: 1 !important;
 }
 
-/* Make subtitle and normal labels brighter */
+/* Strong readable text */
 .aa-subtitle,
 label,
 p,
@@ -377,10 +377,9 @@ small,
 [data-testid="stMarkdownContainer"] p,
 [data-testid="stWidgetLabel"] {
   color: rgba(255,255,255,0.95) !important;
-  opacity: 1 !important;
 }
 
-/* Strengthen title rendering in packaged app */
+/* Title clarity */
 .aa-title,
 .aa-title-second {
   text-shadow:
@@ -390,62 +389,90 @@ small,
   opacity: 1 !important;
 }
 
-/* Force slider text, numbers, min/max labels to white */
-[data-testid="stSlider"],
-[data-testid="stSlider"] *,
-[data-baseweb="slider"],
-[data-baseweb="slider"] * {
+/* ---------- INPUT FIX (NO MORE WHITE BLOCKS) ---------- */
+input, textarea {
   color: rgba(255,255,255,0.96) !important;
-  opacity: 1 !important;
+  background: rgba(255,255,255,0.08) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  box-shadow: none !important;
 }
 
-/* Force cyan slider thumb */
-[data-testid="stSlider"] div[data-baseweb="slider"] div[role="slider"]{
+/* Streamlit input wrappers */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.10),
+    rgba(255,255,255,0.05)
+  ) !important;
+  border-radius: 12px !important;
+}
+
+/* Placeholder */
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stNumberInput"] input::placeholder {
+  color: rgba(255,255,255,0.5) !important;
+}
+
+/* ---------- SLIDER FULL FIX (FORCE CYAN) ---------- */
+
+/* ensure spacing */
+[data-testid="stSlider"] [data-baseweb="slider"] {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+/* knob */
+[data-testid="stSlider"] [role="slider"] {
   background: #00E5FF !important;
-  border: 1px solid rgba(0,229,255,0.42) !important;
+  border: 1px solid rgba(0,229,255,0.45) !important;
   box-shadow:
     0 0 0 6px rgba(0,229,255,0.12),
     0 10px 28px rgba(0,229,255,0.24) !important;
 }
 
-/* Force active slider track cyan */
-[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] > div{
-  background: rgba(0,229,255,0.75) !important;
+/* reset all internal tracks */
+[data-testid="stSlider"] [data-baseweb="slider"] > div > div {
+  background: transparent !important;
 }
 
-/* Force inactive slider track pale */
-[data-testid="stSlider"] div[data-baseweb="slider"] div[role="presentation"] > div + div{
+/* inactive rail */
+[data-testid="stSlider"] [data-baseweb="slider"] div[role="presentation"] div {
   background: rgba(255,255,255,0.14) !important;
 }
 
-/* Kill random browser accent colors like orange */
-* {
-  accent-color: #00E5FF !important;
+/* active rail */
+[data-testid="stSlider"] [data-baseweb="slider"] div[role="presentation"] div:first-child {
+  background: rgba(0,229,255,0.78) !important;
 }
 
-/* Inputs brighter and less washed out */
-input, textarea {
+/* slider text */
+[data-testid="stSlider"],
+[data-testid="stSlider"] * {
   color: rgba(255,255,255,0.96) !important;
-  background: rgba(255,255,255,0.96) !important;
+  opacity: 1 !important;
 }
 
-/* Expander headers brighter */
+/* ---------- EXPANDERS ---------- */
 [data-testid="stExpander"] summary,
 [data-testid="stExpander"] summary *{
   color: rgba(255,255,255,0.94) !important;
   opacity: 1 !important;
 }
 
-/* Buttons keep solid text */
+/* ---------- BUTTON TEXT ---------- */
 .stButton>button,
 .stButton>button * {
   color: rgba(255,255,255,0.97) !important;
-  opacity: 1 !important;
 }
 
-/* Slightly strengthen hero glass so text pops more */
+/* ---------- HERO PANEL BOOST ---------- */
 .aa-hero {
-  background: linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03)) !important;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.09),
+    rgba(255,255,255,0.03)
+  ) !important;
   border: 1px solid rgba(255,255,255,0.13) !important;
 }
 </style>
