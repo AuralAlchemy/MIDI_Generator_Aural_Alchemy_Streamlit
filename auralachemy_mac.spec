@@ -64,5 +64,5 @@ app = BUNDLE(
     coll,
     name="AuralAlchemy MIDI Generator.app",
     icon="assets/icon.icns",
-    bundle_identifier="com.auralchemy.midigenerator",
+    bundle_identifier="com.auralachemy.midigenerator",
 )
