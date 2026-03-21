@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# auralalchemy.spec  -  Windows build
+# auralalchemy.spec - Windows build
 
 import sys
 from pathlib import Path
@@ -22,59 +22,59 @@ hiddenimports += collect_submodules("mido")
 hiddenimports += collect_submodules("altair")
 hiddenimports += [
     "streamlit.runtime.scriptrunner.magic_funcs",
-        "streamlit.web.cli",
-            "click",
-                "numpy",
-                    "pandas",
-                        "PIL",
-                            "pretty_midi",
-                                "mido",
-                                ]
+    "streamlit.web.cli",
+    "click",
+    "numpy",
+    "pandas",
+    "PIL",
+    "pretty_midi",
+    "mido",
+]
 
-                                a = Analysis(
-                                    ["launcher.py"],
-                                        pathex=[],
-                                            binaries=[],
-                                                datas=datas,
-                                                    hiddenimports=hiddenimports,
-                                                        hookspath=[],
-                                                            hooksconfig={},
-                                                                runtime_hooks=[],
-                                                                    excludes=[
-                                                                            "matplotlib",
-                                                                                    "scipy",
-                                                                                            "IPython",
-                                                                                                    "jedi",
-                                                                                                            "tkinter",
-                                                                                                                    "pytest",
-                                                                                                                            "notebook",
-                                                                                                                                    "jupyter",
-                                                                                                                                        ],
-                                                                                                                                            noarchive=False,
-                                                                                                                                            )
-                                                                                                                                            
-                                                                                                                                            pyz = PYZ(a.pure)
-                                                                                                                                            
-                                                                                                                                            exe = EXE(
-                                                                                                                                                pyz,
-                                                                                                                                                    a.scripts,
-                                                                                                                                                        [],
-                                                                                                                                                            exclude_binaries=True,
-                                                                                                                                                                name="AuralAlchemy MIDI Generator",
-                                                                                                                                                                    debug=False,
-                                                                                                                                                                        bootloader_ignore_signals=False,
-                                                                                                                                                                            strip=False,
-                                                                                                                                                                                upx=False,
-                                                                                                                                                                                    console=False,
-                                                                                                                                                                                        icon="assets/icon.ico",
-                                                                                                                                                                                        )
-                                                                                                                                                                                        
-                                                                                                                                                                                        coll = COLLECT(
-                                                                                                                                                                                            exe,
-                                                                                                                                                                                                a.binaries,
-                                                                                                                                                                                                    a.datas,
-                                                                                                                                                                                                        strip=False,
-                                                                                                                                                                                                            upx=False,
-                                                                                                                                                                                                                upx_exclude=[],
-                                                                                                                                                                                                                    name="AuralAlchemy MIDI Generator",
-                                                                                                                                                                                                                    )
+a = Analysis(
+    ["launcher.py"],
+    pathex=[],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={],
+    runtime_hooks=[],
+    excludes=[
+        "matplotlib",
+        "scipy",
+        "IPython",
+        "jedi",
+        "tkinter",
+        "pytest",
+        "notebook",
+        "jupyter",
+    ],
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="AuralAlchemy MIDI Generator",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    icon="assets/icon.ico",
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="AuralAlchemy MIDI Generator",
+)
