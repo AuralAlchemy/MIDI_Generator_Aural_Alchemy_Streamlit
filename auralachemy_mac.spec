@@ -3,7 +3,6 @@
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
-# -- Data files ---------------------------------------------------------------
 datas = []
 datas += collect_data_files("streamlit")
 datas += collect_data_files("altair")
@@ -12,7 +11,6 @@ datas += [("app.py", ".")]
 datas += [(".streamlit", ".streamlit")]
 datas += [("assets", "assets")]
 
-# -- Hidden imports -----------------------------------------------------------
 hiddenimports = []
 hiddenimports += collect_submodules("streamlit")
 hiddenimports += collect_submodules("pretty_midi")
