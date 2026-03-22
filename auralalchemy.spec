@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 # auralalchemy.spec - Windows single-file build
 
+import os
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 datas = []
@@ -63,6 +65,6 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon="assets/icon.ico",
+    icon=os.path.join(SPECPATH, "assets", "icon.ico"),
 )
 
