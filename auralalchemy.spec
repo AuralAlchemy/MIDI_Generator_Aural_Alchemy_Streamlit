@@ -66,4 +66,6 @@ exe = EXE(
     upx=False,
     console=False,
     icon=os.path.join(SPECPATH, "assets", "icon.ico"),
+    manifest=os.path.join(SPECPATH, "auralalchemy.manifest"),
 )
+
