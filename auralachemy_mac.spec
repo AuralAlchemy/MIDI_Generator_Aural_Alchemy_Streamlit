@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 # auralachemy_mac.spec - macOS single-file build
 
+import os
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 datas = []
@@ -63,7 +65,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon="assets/icon.icns",
+    icon=os.path.join(SPECPATH, "assets", "icon.icns"),
 )
 
 app = BUNDLE(
