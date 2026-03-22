@@ -71,7 +71,7 @@ exe = EXE(
 app = BUNDLE(
     exe,
     name="AuralAlchemy MIDI Generator.app",
-    icon="assets/icon.icns",
+    icon=os.path.join(SPECPATH, "assets", "icon.icns"),
     bundle_identifier="com.auralchemy.midigenerator",
     info_plist={
         "NSHighResolutionCapable": True,
