@@ -1,6 +1,6 @@
 # launcher.py - Aural Alchemy MIDI Generator
 # Starts the embedded Streamlit server then opens the default browser.
-# Compatible with Streamlit >= 1.28 and PyInstaller bundles.
+# Shuts down automatically when the browser disconnects.
 
 import os
 import sys
@@ -8,6 +8,7 @@ import time
 import socket
 import threading
 import webbrowser
+import signal
 from pathlib import Path
 
 
@@ -33,6 +34,29 @@ def open_browser_when_ready(port: int = 8501) -> None:
         webbrowser.open(f"http://127.0.0.1:{port}")
 
 
+def watch_for_disconnect(host: str = "127.0.0.1", port: int = 8501) -> None:
+    """
+    Wait until the server is up, then poll it every 3 seconds.
+    If it becomes unreachable, shut down the whole process immediately.
+    """
+    # Wait for server to come up first
+    if not wait_for_server(host=host, port=port, timeout=60):
+        return
+
+    # Give the browser a moment to connect
+    time.sleep(8)
+
+    while True:
+        time.sleep(3)
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                pass  # Server still up, keep going
+        except OSError:
+            # Server is down — shut down immediately
+            os.kill(os.getpid(), signal.SIGTERM)
+            sys.exit(0)
+
+
 if __name__ == "__main__":
     base_dir = get_base_dir()
     os.chdir(base_dir)
@@ -43,9 +67,17 @@ if __name__ == "__main__":
 
     port = 8501
 
+    # Open browser once server is ready
     threading.Thread(
         target=open_browser_when_ready,
         kwargs={"port": port},
+        daemon=True,
+    ).start()
+
+    # Shut down when browser disconnects
+    threading.Thread(
+        target=watch_for_disconnect,
+        kwargs={"host": "127.0.0.1", "port": port},
         daemon=True,
     ).start()
 
