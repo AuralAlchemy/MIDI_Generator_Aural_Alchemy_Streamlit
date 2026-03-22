@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# auralachemy_mac.spec - macOS build
+# auralachemy_mac.spec - macOS single-file build
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
@@ -54,8 +54,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="AuralAlchemy MIDI Generator",
     debug=False,
     bootloader_ignore_signals=False,
@@ -65,18 +66,8 @@ exe = EXE(
     icon="assets/icon.icns",
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name="AuralAlchemy MIDI Generator",
-)
-
 app = BUNDLE(
-    coll,
+    exe,
     name="AuralAlchemy MIDI Generator.app",
     icon="assets/icon.icns",
     bundle_identifier="com.auralchemy.midigenerator",
@@ -89,3 +80,4 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "11.0",
     },
 )
+
