@@ -31,17 +31,11 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean auralalchemy.spec
 
-      - name: Zip Windows artifact
-        shell: powershell
-        run: |
-          Compress-Archive -Path "dist\AuralAlchemy MIDI Generator" `
-            -DestinationPath "dist\AuralAlchemy-MIDI-Generator-windows.zip"
-
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: AuralAlchemy-MIDI-Generator-windows
-          path: dist/AuralAlchemy-MIDI-Generator-windows.zip
+          path: "dist/AuralAlchemy MIDI Generator.exe"
 
   build-macos:
     runs-on: macos-latest
