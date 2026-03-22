@@ -67,4 +67,3 @@ exe = EXE(
     console=False,
     icon=os.path.join(SPECPATH, "assets", "icon.ico"),
 )
-
