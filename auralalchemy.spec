@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# auralalchemy.spec - Windows build
+# auralalchemy.spec - Windows single-file build
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
@@ -54,8 +54,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="AuralAlchemy MIDI Generator",
     debug=False,
     bootloader_ignore_signals=False,
@@ -65,12 +66,3 @@ exe = EXE(
     icon="assets/icon.ico",
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name="AuralAlchemy MIDI Generator",
-)
