@@ -1,11 +1,11 @@
 name: Build macOS Catalina (10.15)
 
 on:
-  workflow_dispatch:   # run manually only, from GitHub Actions tab
+  workflow_dispatch:
 
 jobs:
   build-macos-catalina:
-    runs-on: macos-13
+    runs-on: macos-12
 
     steps:
       - name: Checkout repo
@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-          pip install "numpy==1.24.4" "pillow==10.4.0"   # override incompatible versions
+          pip install "numpy==1.24.4" "pillow==10.4.0"
 
       - name: Install create-dmg
         run: brew install create-dmg
