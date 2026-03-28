@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-macos-catalina:
-    runs-on: macos-13-xlarge
+    runs-on: macos-14-large
 
     steps:
       - name: Checkout repo
