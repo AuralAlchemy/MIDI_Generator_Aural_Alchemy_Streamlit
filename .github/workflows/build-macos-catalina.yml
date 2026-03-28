@@ -1,0 +1,72 @@
+name: Build macOS Catalina (10.15)
+
+on:
+  workflow_dispatch:   # run manually only, from GitHub Actions tab
+
+jobs:
+  build-macos-catalina:
+    runs-on: macos-13
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (Catalina-compatible versions)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+          pip install "numpy==1.24.4" "pillow==10.4.0"   # override incompatible versions
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build macOS app
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+        run: |
+          pyinstaller --noconfirm --clean auralachemy_mac.spec
+
+      - name: Patch LSMinimumSystemVersion to 10.15
+        run: |
+          PLIST="dist/AuralAlchemy MIDI Generator.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c \
+            "Set :LSMinimumSystemVersion 10.15" "$PLIST"
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "AuralAlchemy MIDI Generator" \
+            --volicon "assets/icon.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --icon "AuralAlchemy MIDI Generator.app" 175 190 \
+            --hide-extension "AuralAlchemy MIDI Generator.app" \
+            --app-drop-link 425 190 \
+            "dist/AuralAlchemy-MIDI-Generator-Catalina.dmg" \
+            "dist/AuralAlchemy MIDI Generator.app" \
+            || true
+
+      - name: Fallback DMG
+        run: |
+          if [ ! -f "dist/AuralAlchemy-MIDI-Generator-Catalina.dmg" ]; then
+            hdiutil create \
+              -volname "AuralAlchemy MIDI Generator" \
+              -srcfolder "dist/AuralAlchemy MIDI Generator.app" \
+              -ov -format UDZO \
+              "dist/AuralAlchemy-MIDI-Generator-Catalina.dmg"
+          fi
+
+      - name: Upload Catalina artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuralAlchemy-MIDI-Generator-mac-catalina
+          path: dist/AuralAlchemy-MIDI-Generator-Catalina.dmg
