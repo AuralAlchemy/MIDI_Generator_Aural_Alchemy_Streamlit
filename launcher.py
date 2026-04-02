@@ -53,11 +53,23 @@ def watch_for_disconnect(host: str = "127.0.0.1", port: int = 8501) -> None:
 
 def kill_port(port: int) -> None:
     if sys.platform == "darwin" or sys.platform.startswith("linux"):
-        subprocess.call(
-            f"lsof -ti tcp:{port} | xargs kill -9",
-            shell=True,
-            stderr=subprocess.DEVNULL
-        )
+        try:
+            result = subprocess.check_output(
+                f"lsof -ti tcp:{port}",
+                shell=True,
+                stderr=subprocess.DEVNULL
+            ).decode().strip()
+            if result:
+                for pid in result.split("\n"):
+                    pid = pid.strip()
+                    if pid:
+                        subprocess.call(
+                            f"kill -9 {pid}",
+                            shell=True,
+                            stderr=subprocess.DEVNULL
+                        )
+        except subprocess.CalledProcessError:
+            pass
     elif sys.platform == "win32":
         subprocess.call(
             f"for /f \"tokens=5\" %a in ('netstat -aon ^| find \":{port}\"') do taskkill /F /PID %a",
