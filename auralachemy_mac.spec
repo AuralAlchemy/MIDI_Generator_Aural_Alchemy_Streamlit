@@ -80,6 +80,7 @@ app = BUNDLE(
         "CFBundleShortVersionString": "1.0.0",
         "CFBundleVersion": "1",
         "LSMinimumSystemVersion": "11.0",
+        "LSMultipleInstancesProhibited": False,
     },
 )
 
