@@ -9,6 +9,7 @@ import socket
 import threading
 import webbrowser
 import signal
+import subprocess
 from pathlib import Path
 
 
@@ -35,26 +36,35 @@ def open_browser_when_ready(port: int = 8501) -> None:
 
 
 def watch_for_disconnect(host: str = "127.0.0.1", port: int = 8501) -> None:
-    """
-    Wait until the server is up, then poll it every 3 seconds.
-    If it becomes unreachable, shut down the whole process immediately.
-    """
-    # Wait for server to come up first
     if not wait_for_server(host=host, port=port, timeout=60):
         return
 
-    # Give the browser a moment to connect
     time.sleep(8)
 
     while True:
         time.sleep(3)
         try:
             with socket.create_connection((host, port), timeout=2):
-                pass  # Server still up, keep going
+                pass
         except OSError:
-            # Server is down — shut down immediately
             os.kill(os.getpid(), signal.SIGTERM)
             sys.exit(0)
+
+
+def kill_port(port: int) -> None:
+    if sys.platform == "darwin" or sys.platform.startswith("linux"):
+        subprocess.call(
+            f"lsof -ti tcp:{port} | xargs kill -9",
+            shell=True,
+            stderr=subprocess.DEVNULL
+        )
+    elif sys.platform == "win32":
+        subprocess.call(
+            f"for /f \"tokens=5\" %a in ('netstat -aon ^| find \":{port}\"') do taskkill /F /PID %a",
+            shell=True,
+            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL
+        )
 
 
 if __name__ == "__main__":
@@ -66,6 +76,10 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"app.py not found at {app_path}")
 
     port = 8501
+
+    # Kill any ghost server still on this port
+    kill_port(port)
+    time.sleep(1)
 
     # Open browser once server is ready
     threading.Thread(
